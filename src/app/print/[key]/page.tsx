@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
-import { WAREHOUSES } from '@/lib/warehouses';
+import { WAREHOUSES, ROAD_COL_KEY, colsWithRoad } from '@/lib/warehouses';
 import { notFound } from 'next/navigation';
 import type { Cell, Container, AmbroEntry } from '@/types/db';
 import { PrintAutoLaunch } from '@/components/PrintAutoLaunch';
@@ -82,6 +82,8 @@ function PrintGrid({ cfg, cells, containers, today, empty }: any) {
   if (cfg.rowsReversed) rowNumbers.reverse();
   if (cfg.hasMagazynek) rowNumbers.push('M');
 
+  const allCols = colsWithRoad(cfg);
+
   return (
     <div className="p-2 print-page">
       <PrintStyles />
@@ -97,16 +99,10 @@ function PrintGrid({ cfg, cells, containers, today, empty }: any) {
         <colgroup>
           <col style={{ width: '3%' }} />
           <col style={{ width: '6%' }} />
-          {cfg.cols.map((_: any, idx: number) => {
-            const els: any[] = [
-              <col key={`g-${idx}`} />,
-              <col key={`d-${idx}`} />,
-            ];
-            if (cfg.roadAfter !== undefined && idx === cfg.roadAfter - 1) {
-              els.push(<col key={`r-${idx}`} style={{ width: '2%' }} />);
-            }
-            return els;
-          }).flat()}
+          {allCols.flatMap((_: any, idx: number) => [
+            <col key={`g-${idx}`} />,
+            <col key={`d-${idx}`} />,
+          ])}
           <col style={{ width: '3%' }} />
         </colgroup>
 
@@ -114,30 +110,18 @@ function PrintGrid({ cfg, cells, containers, today, empty }: any) {
           <tr>
             <th></th>
             <th></th>
-            {cfg.cols.flatMap((col: string, idx: number) => {
-              const arr: any[] = [
-                <th key={col} colSpan={2} className="colhead">{col}</th>,
-              ];
-              if (cfg.roadAfter !== undefined && idx === cfg.roadAfter - 1) {
-                arr.push(<th key={`r-${idx}`} className="road-head" />);
-              }
-              return arr;
-            })}
+            {allCols.map((col: string) => (
+              <th key={col} colSpan={2} className={col === ROAD_COL_KEY ? 'colhead road-head' : 'colhead'}>{col}</th>
+            ))}
             <th></th>
           </tr>
           <tr>
             <th></th>
             <th></th>
-            {cfg.cols.flatMap((col: string, idx: number) => {
-              const arr: any[] = [
-                <th key={`${col}-g`} className="sub">góra</th>,
-                <th key={`${col}-d`} className="sub">dół</th>,
-              ];
-              if (cfg.roadAfter !== undefined && idx === cfg.roadAfter - 1) {
-                arr.push(<th key={`r-${idx}`} className="road-cell">DROGA</th>);
-              }
-              return arr;
-            })}
+            {allCols.flatMap((col: string) => [
+              <th key={`${col}-g`} className={col === ROAD_COL_KEY ? 'sub road-sub' : 'sub'}>góra</th>,
+              <th key={`${col}-d`} className={col === ROAD_COL_KEY ? 'sub road-sub' : 'sub'}>dół</th>,
+            ])}
             <th></th>
           </tr>
         </thead>
@@ -149,7 +133,7 @@ function PrintGrid({ cfg, cells, containers, today, empty }: any) {
                 <tr key="magazynek">
                   <td className="rownum">M</td>
                   <td className="sub-label" style={{ background: '#fef3c7' }}>Magazynek</td>
-                  <td colSpan={cfg.cols.length * 2 + (cfg.roadAfter !== undefined ? 1 : 0)} className="magazynek-cell">&nbsp;</td>
+                  <td colSpan={allCols.length * 2} className="magazynek-cell">&nbsp;</td>
                   <td className="rownum">M</td>
                 </tr>
               );
@@ -161,25 +145,22 @@ function PrintGrid({ cfg, cells, containers, today, empty }: any) {
                   <td rowSpan={subRows.length} className="rownum">{r}</td>
                 )}
                 <td className="sub-label">{subLabels[sub]}</td>
-                {cfg.cols.flatMap((col: string, colIdx: number) => {
+                {allCols.flatMap((col: string) => {
+                  const isRoad = col === ROAD_COL_KEY;
                   const c = map.get(`${col}|${r}`);
                   const tds: any[] = [];
 
                   if (sub === 'kwit') {
                     const { top, bot } = splitTopBot(c?.raw_label);
-                    tds.push(<td key={`${col}-${r}-k-t`} className="lbl">{top}</td>);
-                    tds.push(<td key={`${col}-${r}-k-b`} className="lbl">{bot}</td>);
+                    tds.push(<td key={`${col}-${r}-k-t`} className={isRoad ? 'lbl road-bg' : 'lbl'}>{top}</td>);
+                    tds.push(<td key={`${col}-${r}-k-b`} className={isRoad ? 'lbl road-bg' : 'lbl'}>{bot}</td>);
                   } else if (sub === 'starch') {
                     const { top, bot } = splitTopBot(c?.starch);
-                    tds.push(<td key={`${col}-${r}-s-t`} className="info">{top}</td>);
-                    tds.push(<td key={`${col}-${r}-s-b`} className="info">{bot}</td>);
+                    tds.push(<td key={`${col}-${r}-s-t`} className={isRoad ? 'info road-bg' : 'info'}>{top}</td>);
+                    tds.push(<td key={`${col}-${r}-s-b`} className={isRoad ? 'info road-bg' : 'info'}>{bot}</td>);
                   } else {
-                    tds.push(<td key={`${col}-${r}-w-t`} className="w">{fmt(c?.weight_top)}</td>);
-                    tds.push(<td key={`${col}-${r}-w-b`} className="w">{fmt(c?.weight_bot)}</td>);
-                  }
-
-                  if (cfg.roadAfter !== undefined && colIdx === cfg.roadAfter - 1) {
-                    tds.push(<td key={`road-${r}-${sub}`} className="road-cell" />);
+                    tds.push(<td key={`${col}-${r}-w-t`} className={isRoad ? 'w road-bg' : 'w'}>{fmt(c?.weight_top)}</td>);
+                    tds.push(<td key={`${col}-${r}-w-b`} className={isRoad ? 'w road-bg' : 'w'}>{fmt(c?.weight_bot)}</td>);
                   }
 
                   return tds;
@@ -293,7 +274,9 @@ function PrintStyles() {
       .print-grid tr.row-start td { border-top: 2px solid black; }
 
       .print-grid td.road-cell, .print-grid th.road-head { background: #d1d5db; }
-      .print-grid th.road-head { background: #9ca3af; color: white; font-size: 8px; }
+      .print-grid th.road-head { background: #6b7280; color: white; }
+      .print-grid th.road-sub { background: #9ca3af; color: white; }
+      .print-grid td.road-bg { background: #f3f4f6; }
       .print-grid td.magazynek-cell { background: #fef9c3; height: 22px; }
 
       .containers-title { margin: 6px 0 2px; font-size: 11px; font-weight: 700; }

@@ -3,12 +3,13 @@ export interface Cell {
   warehouse: string;
   col: string;
   row: number;
-  slot: 'gora' | 'dol';
   raw_label: string | null;
   product_code: string | null;
+  product_code_bot: string | null;
   kwit: string | null;
   starch: string | null;
-  weight: number | null;
+  weight_top: number | null;
+  weight_bot: number | null;
   note: string | null;
   updated_at: string;
 }

@@ -11,8 +11,10 @@ function num(v: any): number | null {
 }
 
 export async function saveCell(input: {
-  warehouse: string; col: string; row: number; slot: 'gora' | 'dol';
-  raw_label?: string; starch?: string; weight?: any; note?: string; kwit?: string;
+  warehouse: string; col: string; row: number;
+  raw_label?: string; starch?: string;
+  weight_top?: any; weight_bot?: any;
+  note?: string; kwit?: string;
 }) {
   const supabase = await createClient();
   const parsed = parseProductCode(input.raw_label ?? '');
@@ -20,29 +22,30 @@ export async function saveCell(input: {
     warehouse: input.warehouse,
     col: input.col,
     row: input.row,
-    slot: input.slot,
     raw_label: input.raw_label?.trim() || null,
     product_code: parsed.code,
+    product_code_bot: parsed.codeBot,
     kwit: parsed.kwit ?? input.kwit?.trim() ?? null,
     starch: input.starch?.trim() || null,
-    weight: num(input.weight),
+    weight_top: num(input.weight_top),
+    weight_bot: num(input.weight_bot),
     note: input.note?.trim() || null,
   };
   const { error } = await supabase
     .from('cells')
-    .upsert(payload, { onConflict: 'warehouse,col,row,slot' });
+    .upsert(payload, { onConflict: 'warehouse,col,row' });
   if (error) return { ok: false, error: error.message };
   revalidatePath(`/warehouse/${input.warehouse}`);
   revalidatePath('/');
   return { ok: true, product_code: parsed.code, kwit: parsed.kwit };
 }
 
-export async function clearCell(input: { warehouse: string; col: string; row: number; slot: 'gora' | 'dol' }) {
+export async function clearCell(input: { warehouse: string; col: string; row: number }) {
   const supabase = await createClient();
   const { error } = await supabase
     .from('cells')
     .delete()
-    .match({ warehouse: input.warehouse, col: input.col, row: input.row, slot: input.slot });
+    .match({ warehouse: input.warehouse, col: input.col, row: input.row });
   if (error) return { ok: false, error: error.message };
   revalidatePath(`/warehouse/${input.warehouse}`);
   revalidatePath('/');

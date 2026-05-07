@@ -74,8 +74,9 @@ function PrintGrid({ cfg, cells, containers, today, empty }: any) {
   const map = new Map<string, Cell>();
   for (const c of cells) map.set(`${c.col}|${c.row}`, c);
 
-  const subRows = cfg.noStarch ? ['kwit', 'weight'] : ['kwit', 'starch', 'weight'];
-  const subLabels: Record<string, string> = { kwit: 'KWIT', starch: 'SKROBIA', weight: 'WAGA' };
+  const subRows = cfg.middleRow ? ['kwit', 'starch', 'weight'] : ['kwit', 'weight'];
+  const middleLabel = cfg.middleRow === 'info' ? 'INFO' : 'SKROBIA';
+  const subLabels: Record<string, string> = { kwit: 'KWIT', starch: middleLabel, weight: 'WAGA' };
 
   const rowNumbers: (number | 'M')[] = [];
   for (let i = 1; i <= cfg.rows; i++) rowNumbers.push(i);

@@ -1,3 +1,5 @@
+'use client';
+
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { saveCell, clearCell } from '@/app/actions';
 import { parseProductCode } from '@/lib/products';

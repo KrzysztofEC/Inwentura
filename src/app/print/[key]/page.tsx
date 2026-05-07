@@ -62,7 +62,7 @@ export default async function PrintPage({
 
 function PrintGrid({ cfg, cells, containers, today, empty }: any) {
   const map = new Map<string, Cell>();
-  for (const c of cells) map.set(`${c.col}|${c.row}|${c.slot}`, c);
+  for (const c of cells) map.set(`${c.col}|${c.row}`, c);
 
   return (
     <div className="p-2 print-page">
@@ -71,73 +71,43 @@ function PrintGrid({ cfg, cells, containers, today, empty }: any) {
       <div className="flex justify-between border-b-2 border-black pb-1 mb-2 items-center">
         <div className="text-xs"><b>DATA:</b> {today}</div>
         <div className="font-bold uppercase text-sm">{cfg.name} {empty && <span className="text-xs italic font-normal">(pusty szablon)</span>}</div>
-        <div></div>
+        <div className="text-xs"><b>WYJŚCIE EW.</b></div>
       </div>
 
       <table className="print-grid">
         <thead>
           <tr>
             <th className="w-5"></th>
-            {cfg.cols.map((col: string) => <th key={col} colSpan={2}>{col}</th>)}
+            {cfg.cols.map((col: string) => <th key={col} colSpan={4}>{col}</th>)}
             <th className="w-5"></th>
           </tr>
           <tr>
             <th></th>
-            {cfg.cols.map((col: string) => (
-              <>
-                <th key={`${col}-g`} className="sub">góra</th>
-                <th key={`${col}-d`} className="sub">dół</th>
-              </>
-            ))}
+            {cfg.cols.flatMap((col: string) => [
+              <th key={`${col}-k`} className="sub">KWIT</th>,
+              <th key={`${col}-s`} className="sub">SKROBIA</th>,
+              <th key={`${col}-wt`} className="sub">góra</th>,
+              <th key={`${col}-wb`} className="sub">dół</th>,
+            ])}
             <th></th>
           </tr>
         </thead>
         <tbody>
-          {Array.from({ length: cfg.rows }, (_, i) => i + 1).map((r) => {
-            return (
-              <>
-                <tr key={`l-${r}`}>
-                  <td rowSpan={3} className="rownum">{r}</td>
-                  {cfg.cols.flatMap((col: string) => (
-                    (['gora', 'dol'] as const).map((slot) => {
-                      const c = map.get(`${col}|${r}|${slot}`);
-                      return (
-                        <td key={`${col}-${r}-${slot}-l`} className="lbl">
-                          {cfg.type === 'blaszak' ? 'frakcja' : 'KWIT'}
-                          <br /><b>{c?.raw_label ?? ''}</b>
-                        </td>
-                      );
-                    })
-                  ))}
-                  <td rowSpan={3} className="rownum">{r}</td>
-                </tr>
-                <tr key={`s-${r}`}>
-                  {cfg.cols.flatMap((col: string) => (
-                    (['gora', 'dol'] as const).map((slot) => {
-                      const c = map.get(`${col}|${r}|${slot}`);
-                      return (
-                        <td key={`${col}-${r}-${slot}-s`} className="info">
-                          SKROBIA<br />{c?.starch ?? ''}
-                        </td>
-                      );
-                    })
-                  ))}
-                </tr>
-                <tr key={`w-${r}`}>
-                  {cfg.cols.flatMap((col: string) => (
-                    (['gora', 'dol'] as const).map((slot) => {
-                      const c = map.get(`${col}|${r}|${slot}`);
-                      return (
-                        <td key={`${col}-${r}-${slot}-w`} className="w">
-                          WAGA<br /><b>{fmt(c?.weight)}</b>
-                        </td>
-                      );
-                    })
-                  ))}
-                </tr>
-              </>
-            );
-          })}
+          {Array.from({ length: cfg.rows }, (_, i) => i + 1).map((r) => (
+            <tr key={r}>
+              <td className="rownum">{r}</td>
+              {cfg.cols.flatMap((col: string) => {
+                const c = map.get(`${col}|${r}`);
+                return [
+                  <td key={`${col}-${r}-k`} className="lbl"><b>{c?.raw_label ?? ''}</b></td>,
+                  <td key={`${col}-${r}-s`} className="info">{c?.starch ?? ''}</td>,
+                  <td key={`${col}-${r}-wt`} className="w"><b>{fmt(c?.weight_top)}</b></td>,
+                  <td key={`${col}-${r}-wb`} className="w"><b>{fmt(c?.weight_bot)}</b></td>,
+                ];
+              })}
+              <td className="rownum">{r}</td>
+            </tr>
+          ))}
         </tbody>
       </table>
 
@@ -224,16 +194,14 @@ function PrintStyles() {
     <style>{`
       @page { size: A4 landscape; margin: 8mm; }
       .print-page { font-family: Arial, sans-serif; color: black; font-size: 10px; }
-      .print-grid { width: 100%; border-collapse: collapse; }
-      .print-grid th, .print-grid td { border: 1px solid black; padding: 1px 3px; text-align: center; vertical-align: top; }
+      .print-grid { width: 100%; border-collapse: collapse; table-layout: fixed; }
+      .print-grid th, .print-grid td { border: 1px solid black; padding: 2px 3px; text-align: center; vertical-align: middle; overflow: hidden; }
       .print-grid th { background: #e5e7eb; font-weight: 600; font-size: 9px; }
-      .print-grid th.sub { background: #f3f4f6; font-weight: 400; font-size: 8px; }
-      .print-grid td.lbl { font-size: 8px; height: 28px; }
-      .print-grid td.lbl b { font-size: 11px; }
-      .print-grid td.info { font-size: 7px; color: #444; height: 18px; }
-      .print-grid td.w { font-size: 8px; height: 22px; }
-      .print-grid td.w b { font-size: 11px; }
-      .print-grid .rownum { background: #1f2937; color: white; font-weight: 700; width: 18px; }
+      .print-grid th.sub { background: #f3f4f6; font-weight: 400; font-size: 7px; padding: 1px; }
+      .print-grid td.lbl { font-size: 10px; font-weight: 600; height: 26px; }
+      .print-grid td.info { font-size: 9px; color: #444; }
+      .print-grid td.w { font-size: 10px; font-weight: 600; }
+      .print-grid .rownum { background: #1f2937; color: white; font-weight: 700; width: 16px; }
 
       .container-print { width: 100%; border-collapse: collapse; font-size: 9px; }
       .container-print th, .container-print td { border: 1px solid black; padding: 2px 4px; }

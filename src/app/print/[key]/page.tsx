@@ -152,13 +152,17 @@ function PrintGrid({ cfg, cells, containers, today, empty }: any) {
                   const tds: any[] = [];
 
                   if (sub === 'kwit') {
-                    const { top, bot } = splitTopBot(c?.raw_label);
-                    tds.push(<td key={`${col}-${r}-k-t`} className={isRoad ? 'lbl road-bg' : 'lbl'}>{top}</td>);
-                    tds.push(<td key={`${col}-${r}-k-b`} className={isRoad ? 'lbl road-bg' : 'lbl'}>{bot}</td>);
+                    tds.push(
+                      <td key={`${col}-${r}-k`} colSpan={2} className={isRoad ? 'lbl road-bg' : 'lbl'}>
+                        {c?.raw_label ?? ''}
+                      </td>
+                    );
                   } else if (sub === 'starch') {
-                    const { top, bot } = splitTopBot(c?.starch);
-                    tds.push(<td key={`${col}-${r}-s-t`} className={isRoad ? 'info road-bg' : 'info'}>{top}</td>);
-                    tds.push(<td key={`${col}-${r}-s-b`} className={isRoad ? 'info road-bg' : 'info'}>{bot}</td>);
+                    tds.push(
+                      <td key={`${col}-${r}-s`} colSpan={2} className={isRoad ? 'info road-bg' : 'info'}>
+                        {c?.starch ?? ''}
+                      </td>
+                    );
                   } else {
                     tds.push(<td key={`${col}-${r}-w-t`} className={isRoad ? 'w road-bg' : 'w'}>{fmt(c?.weight_top)}</td>);
                     tds.push(<td key={`${col}-${r}-w-b`} className={isRoad ? 'w road-bg' : 'w'}>{fmt(c?.weight_bot)}</td>);

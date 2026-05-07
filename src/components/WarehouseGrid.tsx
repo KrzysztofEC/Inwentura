@@ -166,40 +166,46 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
       return;
     }
 
-    const input = e.currentTarget;
-    const atStart = input.selectionStart === 0;
-    const atEnd = input.selectionEnd === input.value.length;
-
-    if (e.key === 'ArrowRight' && atEnd) {
+    // STRZAŁKI: ruch po całych komórkach (jak w excelu).
+    // Pole (kod/skrobia/waga) zostaje to samo - przeskakujemy w bok do tego samego pola w sąsiedniej komórce.
+    if (e.key === 'ArrowRight') {
       e.preventDefault();
       persist(col, row, slot);
-      if (fieldIdx < FIELDS.length - 1) {
-        focusInput(col, row, slot, FIELDS[fieldIdx + 1]);
-      } else {
-        const n = nextCell();
-        if (n) focusInput(n.col, n.row, n.slot, FIELDS[0]);
+      if (slot === 'gora') {
+        focusInput(col, row, 'dol', field);
+      } else if (colIdx < cols.length - 1) {
+        focusInput(cols[colIdx + 1], row, 'gora', field);
+      } else if (row < rows) {
+        focusInput(cols[0], row + 1, 'gora', field);
       }
-    } else if (e.key === 'ArrowLeft' && atStart) {
+    } else if (e.key === 'ArrowLeft') {
       e.preventDefault();
       persist(col, row, slot);
-      if (fieldIdx > 0) {
-        focusInput(col, row, slot, FIELDS[fieldIdx - 1]);
-      } else {
-        const p = prevCell();
-        if (p) focusInput(p.col, p.row, p.slot, FIELDS[FIELDS.length - 1]);
+      if (slot === 'dol') {
+        focusInput(col, row, 'gora', field);
+      } else if (colIdx > 0) {
+        focusInput(cols[colIdx - 1], row, 'dol', field);
+      } else if (row > 1) {
+        focusInput(cols[cols.length - 1], row - 1, 'dol', field);
       }
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
       persist(col, row, slot);
-      if (slot === 'gora') focusInput(col, row, 'dol', field);
-      else if (row < rows) focusInput(col, row + 1, 'gora', field);
+      if (slot === 'gora') {
+        focusInput(col, row, 'dol', field);
+      } else if (row < rows) {
+        focusInput(col, row + 1, 'gora', field);
+      }
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       persist(col, row, slot);
-      if (slot === 'dol') focusInput(col, row, 'gora', field);
-      else if (row > 1) focusInput(col, row - 1, 'dol', field);
+      if (slot === 'dol') {
+        focusInput(col, row, 'gora', field);
+      } else if (row > 1) {
+        focusInput(col, row - 1, 'dol', field);
+      }
     } else if (e.key === 'Escape') {
-      input.blur();
+      e.currentTarget.blur();
     }
   }
 
@@ -276,8 +282,9 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
         </tbody>
       </table>
       <div className="text-xs text-gray-500 px-2 py-1 border-t bg-gray-50">
-        <strong>Skróty:</strong> Tab / Enter / → = następne pole · Shift+Tab / ← = poprzednie ·
-        ↓↑ = ten sam typ pola w komórce niżej/wyżej · zapis automatyczny przy opuszczaniu pola
+        <strong>Skróty:</strong> ←↑↓→ = ruch po komórkach (jak w excelu) ·
+        Tab / Enter = następne pole w komórce (kod → skrobia → waga) ·
+        Shift+Tab = wstecz · zapis automatyczny
       </div>
     </div>
   );

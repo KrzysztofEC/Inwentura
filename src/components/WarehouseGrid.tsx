@@ -6,12 +6,13 @@ import { parseProductCode, productName } from '@/lib/products';
 import type { Cell } from '@/types/db';
 import type { WarehouseConfig } from '@/lib/warehouses';
 
-type Field = 'kwit' | 'starch' | 'weight_top' | 'weight_bot';
-const FIELDS: Field[] = ['kwit', 'starch', 'weight_top', 'weight_bot'];
+type Field = 'kwit_top' | 'kwit_bot' | 'starch_top' | 'starch_bot' | 'weight_top' | 'weight_bot';
 
 interface CellState {
-  raw_label: string;
-  starch: string;
+  kwit_top: string;
+  kwit_bot: string;
+  starch_top: string;
+  starch_bot: string;
   weight_top: string;
   weight_bot: string;
   note: string;
@@ -24,25 +25,62 @@ interface CellState {
 
 function emptyState(): CellState {
   return {
-    raw_label: '', starch: '', weight_top: '', weight_bot: '', note: '',
-    product_code: null, product_code_bot: null, isUnknown: false, saving: false, dirty: false,
+    kwit_top: '', kwit_bot: '',
+    starch_top: '', starch_bot: '',
+    weight_top: '', weight_bot: '',
+    note: '',
+    product_code: null, product_code_bot: null,
+    isUnknown: false, saving: false, dirty: false,
   };
 }
 
 function fromCell(c: Cell | undefined): CellState {
   if (!c) return emptyState();
   const parsed = parseProductCode(c.raw_label ?? '');
+
+  let kwit_top = c.raw_label ?? '';
+  let kwit_bot = '';
+  if (parsed.codeBot && c.raw_label?.includes('/')) {
+    const [first, second] = c.raw_label.split('/', 2).map((s) => s.trim());
+    if (!/^\d+$/.test(second)) {
+      kwit_top = first;
+      kwit_bot = second;
+    }
+  }
+
+  let starch_top = c.starch ?? '';
+  let starch_bot = '';
+  if (c.starch && c.starch.includes('/')) {
+    const [first, second] = c.starch.split('/', 2).map((s) => s.trim());
+    starch_top = first;
+    starch_bot = second;
+  }
+
   return {
-    raw_label: c.raw_label ?? '',
-    starch: c.starch ?? '',
+    kwit_top, kwit_bot,
+    starch_top, starch_bot,
     weight_top: c.weight_top !== null && c.weight_top !== undefined ? String(c.weight_top) : '',
     weight_bot: c.weight_bot !== null && c.weight_bot !== undefined ? String(c.weight_bot) : '',
     note: c.note ?? '',
     product_code: c.product_code ?? parsed.code,
-    product_code_bot: parsed.codeBot,
+    product_code_bot: c.product_code_bot ?? parsed.codeBot,
     isUnknown: c.product_code === 'UNKNOWN' || parsed.isUnknown,
     saving: false, dirty: false,
   };
+}
+
+function buildRawLabel(st: CellState): string {
+  const top = st.kwit_top.trim();
+  const bot = st.kwit_bot.trim();
+  if (top && bot) return `${top} / ${bot}`;
+  return top || bot;
+}
+
+function buildStarch(st: CellState): string {
+  const top = st.starch_top.trim();
+  const bot = st.starch_bot.trim();
+  if (top && bot) return `${top} / ${bot}`;
+  return top || bot;
 }
 
 export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cell[] }) {
@@ -61,19 +99,21 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
 
     setStates((prev) => {
       const m = new Map(prev);
-      const cur = m.get(key)!;
-      m.set(key, { ...cur, saving: true });
+      m.set(key, { ...m.get(key)!, saving: true });
       return m;
     });
 
+    const rawLabel = buildRawLabel(st);
+    const starch = buildStarch(st);
+
     startTransition(async () => {
-      if (!st.raw_label && !st.starch && !st.weight_top && !st.weight_bot && !st.note) {
+      if (!rawLabel && !starch && !st.weight_top && !st.weight_bot && !st.note) {
         await clearCell({ warehouse: cfg.key, col, row });
       } else {
         await saveCell({
           warehouse: cfg.key, col, row,
-          raw_label: st.raw_label,
-          starch: st.starch,
+          raw_label: rawLabel,
+          starch: starch,
           weight_top: st.weight_top,
           weight_bot: st.weight_bot,
           note: st.note,
@@ -83,11 +123,9 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
         const m = new Map(prev);
         const cur = m.get(key);
         if (!cur) return prev;
-        const parsed = parseProductCode(cur.raw_label);
+        const parsed = parseProductCode(rawLabel);
         m.set(key, {
-          ...cur,
-          saving: false,
-          dirty: false,
+          ...cur, saving: false, dirty: false,
           product_code: parsed.code,
           product_code_bot: parsed.codeBot,
           isUnknown: parsed.isUnknown,
@@ -102,8 +140,9 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
       const m = new Map(prev);
       const cur = m.get(`${col}|${row}`) ?? emptyState();
       const next = { ...cur, ...patch, dirty: true };
-      if ('raw_label' in patch) {
-        const parsed = parseProductCode(next.raw_label);
+      if ('kwit_top' in patch || 'kwit_bot' in patch) {
+        const raw = buildRawLabel(next);
+        const parsed = parseProductCode(raw);
         next.product_code = parsed.code;
         next.product_code_bot = parsed.codeBot;
         next.isUnknown = parsed.isUnknown;
@@ -124,6 +163,18 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     }
   }
 
+  type SubRow = 'kwit' | 'starch' | 'weight';
+  type Side = 'top' | 'bot';
+  const SUB_ROWS: SubRow[] = cfg.noStarch ? ['kwit', 'weight'] : ['kwit', 'starch', 'weight'];
+
+  function fieldOf(sub: SubRow, side: Side): Field {
+    return `${sub}_${side}` as Field;
+  }
+  function parseField(f: Field): { sub: SubRow; side: Side } {
+    const [sub, side] = f.split('_') as [SubRow, Side];
+    return { sub, side };
+  }
+
   function handleKey(
     e: React.KeyboardEvent<HTMLInputElement>,
     col: string, row: number, field: Field
@@ -131,149 +182,227 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     const cols = cfg.cols!;
     const rows = cfg.rows!;
     const colIdx = cols.indexOf(col);
-    const fieldIdx = FIELDS.indexOf(field);
-
-    if (e.key === 'Enter' || e.key === 'Tab') {
-      e.preventDefault();
-      persist(col, row);
-      if (e.shiftKey) {
-        if (fieldIdx > 0) {
-          focusInput(col, row, FIELDS[fieldIdx - 1]);
-        } else if (colIdx > 0) {
-          focusInput(cols[colIdx - 1], row, FIELDS[FIELDS.length - 1]);
-        } else if (row > 1) {
-          focusInput(cols[cols.length - 1], row - 1, FIELDS[FIELDS.length - 1]);
-        }
-      } else {
-        if (fieldIdx < FIELDS.length - 1) {
-          focusInput(col, row, FIELDS[fieldIdx + 1]);
-        } else if (colIdx < cols.length - 1) {
-          focusInput(cols[colIdx + 1], row, FIELDS[0]);
-        } else if (row < rows) {
-          focusInput(cols[0], row + 1, FIELDS[0]);
-        }
-      }
-      return;
-    }
+    const { sub, side } = parseField(field);
+    const subIdx = SUB_ROWS.indexOf(sub);
 
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       persist(col, row);
-      if (row < rows) focusInput(col, row + 1, field);
+      if (subIdx < SUB_ROWS.length - 1) {
+        focusInput(col, row, fieldOf(SUB_ROWS[subIdx + 1], side));
+      } else if (row < rows) {
+        focusInput(col, row + 1, fieldOf(SUB_ROWS[0], side));
+      }
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       persist(col, row);
-      if (row > 1) focusInput(col, row - 1, field);
+      if (subIdx > 0) {
+        focusInput(col, row, fieldOf(SUB_ROWS[subIdx - 1], side));
+      } else if (row > 1) {
+        focusInput(col, row - 1, fieldOf(SUB_ROWS[SUB_ROWS.length - 1], side));
+      }
     } else if (e.key === 'ArrowRight') {
       e.preventDefault();
       persist(col, row);
-      if (fieldIdx < FIELDS.length - 1) {
-        focusInput(col, row, FIELDS[fieldIdx + 1]);
+      if (side === 'top') {
+        focusInput(col, row, fieldOf(sub, 'bot'));
       } else if (colIdx < cols.length - 1) {
-        focusInput(cols[colIdx + 1], row, FIELDS[0]);
+        focusInput(cols[colIdx + 1], row, fieldOf(sub, 'top'));
       }
     } else if (e.key === 'ArrowLeft') {
       e.preventDefault();
       persist(col, row);
-      if (fieldIdx > 0) {
-        focusInput(col, row, FIELDS[fieldIdx - 1]);
+      if (side === 'bot') {
+        focusInput(col, row, fieldOf(sub, 'top'));
       } else if (colIdx > 0) {
-        focusInput(cols[colIdx - 1], row, FIELDS[FIELDS.length - 1]);
+        focusInput(cols[colIdx - 1], row, fieldOf(sub, 'bot'));
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      persist(col, row);
+      if (subIdx < SUB_ROWS.length - 1) {
+        focusInput(col, row, fieldOf(SUB_ROWS[subIdx + 1], side));
+      } else if (row < rows) {
+        focusInput(col, row + 1, fieldOf(SUB_ROWS[0], side));
+      }
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      persist(col, row);
+      if (e.shiftKey) {
+        if (side === 'bot') {
+          focusInput(col, row, fieldOf(sub, 'top'));
+        } else if (colIdx > 0) {
+          focusInput(cols[colIdx - 1], row, fieldOf(sub, 'bot'));
+        }
+      } else {
+        if (side === 'top') {
+          focusInput(col, row, fieldOf(sub, 'bot'));
+        } else if (colIdx < cols.length - 1) {
+          focusInput(cols[colIdx + 1], row, fieldOf(sub, 'top'));
+        }
       }
     } else if (e.key === 'Escape') {
       e.currentTarget.blur();
     }
   }
 
+  const rowNumbers = (() => {
+    const list: (number | 'M')[] = [];
+    for (let i = 1; i <= cfg.rows!; i++) list.push(i);
+    if (cfg.rowsReversed) list.reverse();
+    if (cfg.hasMagazynek) list.push('M');
+    return list;
+  })();
+
+  const roadAfter = cfg.roadAfter;
+
+  function cellBgClass(st: CellState): string {
+    if (st.isUnknown) return 'bg-red-50';
+    if (st.product_code || st.weight_top || st.weight_bot) return 'bg-green-50';
+    return '';
+  }
+
   return (
     <div className="bg-white rounded shadow-sm overflow-x-auto">
-      <table ref={tableRef} className="border-collapse w-full text-xs">
+      <table ref={tableRef} className="border-collapse w-full" style={{ tableLayout: 'fixed' }}>
+        <colgroup>
+          <col style={{ width: 36 }} />
+          <col style={{ width: 70 }} />
+          {cfg.cols!.map((_, idx) => {
+            const cols: any[] = [
+              <col key={`g-${idx}`} style={{ width: 70 }} />,
+              <col key={`d-${idx}`} style={{ width: 70 }} />,
+            ];
+            if (roadAfter !== undefined && idx === roadAfter - 1) {
+              cols.push(<col key={`road-${idx}`} style={{ width: 30 }} />);
+            }
+            return cols;
+          }).flat()}
+          <col style={{ width: 36 }} />
+        </colgroup>
+
         <thead className="sticky top-0 z-10">
           <tr>
-            <th className="bg-gray-900 text-white w-8"></th>
-            {cfg.cols!.map((col) => (
-              <th key={col} colSpan={4} className="bg-gray-900 text-white border border-gray-700 px-1 py-1 text-sm">
-                {col}
-              </th>
-            ))}
+            <th className="bg-gray-900 text-white"></th>
+            <th className="bg-gray-900 text-white text-xs">DATA</th>
+            {cfg.cols!.flatMap((col, idx) => {
+              const headers: any[] = [
+                <th key={col} colSpan={2} className="bg-gray-900 text-white border border-gray-700 text-sm font-bold py-1">{col}</th>,
+              ];
+              if (roadAfter !== undefined && idx === roadAfter - 1) {
+                headers.push(<th key={`r-${idx}`} className="bg-gray-300"></th>);
+              }
+              return headers;
+            })}
+            <th className="bg-gray-900 text-white"></th>
           </tr>
           <tr>
-            <th className="bg-gray-900"></th>
-            {cfg.cols!.flatMap((col) => [
-              <th key={`${col}-k`}  className="bg-gray-700 text-gray-200 font-normal text-[10px] py-0.5 border border-gray-600">KWIT</th>,
-              <th key={`${col}-s`}  className="bg-gray-700 text-gray-200 font-normal text-[10px] py-0.5 border border-gray-600">SKROBIA</th>,
-              <th key={`${col}-wt`} className="bg-gray-700 text-gray-200 font-normal text-[10px] py-0.5 border border-gray-600">WAGA góra</th>,
-              <th key={`${col}-wb`} className="bg-gray-700 text-gray-200 font-normal text-[10px] py-0.5 border border-gray-600">WAGA dół</th>,
-            ])}
+            <th className="bg-gray-900 text-white text-[10px]"></th>
+            <th className="bg-gray-700 text-gray-200 text-[10px] font-normal"></th>
+            {cfg.cols!.flatMap((col, idx) => {
+              const headers: any[] = [
+                <th key={`${col}-g`} className="bg-gray-700 text-gray-200 font-normal text-[10px] border border-gray-600">góra</th>,
+                <th key={`${col}-d`} className="bg-gray-700 text-gray-200 font-normal text-[10px] border border-gray-600">dół</th>,
+              ];
+              if (roadAfter !== undefined && idx === roadAfter - 1) {
+                headers.push(<th key={`r-${idx}`} className="bg-gray-300 text-[9px] font-bold text-gray-700" style={{ writingMode: 'vertical-rl' }}>DROGA</th>);
+              }
+              return headers;
+            })}
+            <th className="bg-gray-700 text-gray-200 text-[10px] font-normal"></th>
           </tr>
         </thead>
-        <tbody>
-          {Array.from({ length: cfg.rows! }, (_, i) => i + 1).map((r) => (
-            <tr key={r}>
-              <th className="bg-gray-900 text-white w-8 text-center align-middle">{r}</th>
-              {cfg.cols!.flatMap((col) => {
-                const key = `${col}|${r}`;
-                const st = states.get(key) ?? emptyState();
-                const cellBg = st.isUnknown ? 'bg-red-50' : (st.product_code || st.weight_top || st.weight_bot) ? 'bg-green-50' : '';
 
-                return [
-                  <td key={`${key}-k`} className={`border p-0 align-middle ${cellBg}`} style={{ minWidth: 90 }}>
-                    <input
-                      data-cell-input={`${cfg.key}|${col}|${r}|kwit`}
-                      value={st.raw_label}
-                      onChange={(e) => update(col, r, { raw_label: e.target.value })}
-                      onBlur={() => persist(col, r)}
-                      onKeyDown={(e) => handleKey(e, col, r, 'kwit')}
-                      title={st.product_code ? `${st.product_code}${st.product_code_bot ? ' / ' + st.product_code_bot : ''}${productName(st.product_code) ? ` (${productName(st.product_code)})` : ''}` : ''}
-                      className={`w-full h-full px-1 py-1 text-[12px] font-semibold border-0 outline-none bg-transparent focus:bg-yellow-100 focus:ring-2 focus:ring-blue-500 focus:ring-inset ${
-                        st.isUnknown ? 'text-red-700' : ''
-                      }`}
-                    />
-                  </td>,
-                  <td key={`${key}-s`} className={`border p-0 align-middle ${cellBg}`} style={{ minWidth: 60 }}>
-                    <input
-                      data-cell-input={`${cfg.key}|${col}|${r}|starch`}
-                      value={st.starch}
-                      onChange={(e) => update(col, r, { starch: e.target.value })}
-                      onBlur={() => persist(col, r)}
-                      onKeyDown={(e) => handleKey(e, col, r, 'starch')}
-                      className="w-full h-full px-1 py-1 text-[11px] text-gray-700 border-0 outline-none bg-transparent focus:bg-yellow-100 focus:ring-2 focus:ring-blue-500 focus:ring-inset"
-                    />
-                  </td>,
-                  <td key={`${key}-wt`} className={`border p-0 align-middle ${cellBg}`} style={{ minWidth: 65 }}>
-                    <input
-                      data-cell-input={`${cfg.key}|${col}|${r}|weight_top`}
-                      type="text"
-                      inputMode="decimal"
-                      value={st.weight_top}
-                      onChange={(e) => update(col, r, { weight_top: e.target.value })}
-                      onBlur={() => persist(col, r)}
-                      onKeyDown={(e) => handleKey(e, col, r, 'weight_top')}
-                      className="w-full h-full px-1 py-1 text-[12px] text-green-800 font-semibold text-right border-0 outline-none bg-transparent focus:bg-yellow-100 focus:ring-2 focus:ring-blue-500 focus:ring-inset"
-                    />
-                  </td>,
-                  <td key={`${key}-wb`} className={`border p-0 align-middle ${cellBg}`} style={{ minWidth: 65 }}>
-                    <input
-                      data-cell-input={`${cfg.key}|${col}|${r}|weight_bot`}
-                      type="text"
-                      inputMode="decimal"
-                      value={st.weight_bot}
-                      onChange={(e) => update(col, r, { weight_bot: e.target.value })}
-                      onBlur={() => persist(col, r)}
-                      onKeyDown={(e) => handleKey(e, col, r, 'weight_bot')}
-                      className="w-full h-full px-1 py-1 text-[12px] text-green-800 font-semibold text-right border-0 outline-none bg-transparent focus:bg-yellow-100 focus:ring-2 focus:ring-blue-500 focus:ring-inset"
-                    />
-                  </td>,
-                ];
-              })}
-            </tr>
-          ))}
+        <tbody>
+          {rowNumbers.map((rNum) => {
+            if (rNum === 'M') {
+              return (
+                <tr key="magazynek">
+                  <th className="bg-gray-900 text-white w-9 text-center align-middle text-xs">M</th>
+                  <th className="bg-amber-100 border text-xs font-semibold">Magazynek</th>
+                  <td colSpan={cfg.cols!.length * 2 + (roadAfter !== undefined ? 1 : 0)} className="border bg-amber-50 text-xs italic text-gray-500 px-2">
+                    (rząd specjalny - dane wpisuj jak zwykłe komórki magazynu w razie potrzeby)
+                  </td>
+                  <th className="bg-gray-900 text-white w-9 text-center align-middle text-xs">M</th>
+                </tr>
+              );
+            }
+
+            const r = rNum as number;
+            const subRows: SubRow[] = SUB_ROWS;
+
+            return subRows.map((sub, subIdx) => (
+              <tr key={`${r}-${sub}`} className={subIdx === 0 ? 'border-t-2 border-t-gray-700' : ''}>
+                {subIdx === 0 && (
+                  <th rowSpan={subRows.length} className="bg-gray-900 text-white w-9 text-center align-middle text-base font-bold border-r-2 border-gray-700">
+                    {r}
+                  </th>
+                )}
+                <th className="bg-gray-100 border border-gray-300 text-[10px] font-semibold uppercase text-gray-700 px-1">
+                  {sub === 'kwit' ? 'KWIT' : sub === 'starch' ? 'SKROBIA' : 'WAGA'}
+                </th>
+
+                {cfg.cols!.flatMap((col, colIdx) => {
+                  const key = `${col}|${r}`;
+                  const st = states.get(key) ?? emptyState();
+                  const bg = cellBgClass(st);
+
+                  function fieldInput(side: Side) {
+                    const f = fieldOf(sub, side);
+                    const value = st[f as keyof CellState] as string;
+                    const isWeight = sub === 'weight';
+                    const isKwit = sub === 'kwit';
+                    return (
+                      <td key={`${key}-${sub}-${side}`} className={`border border-gray-300 p-0 align-middle ${bg}`}>
+                        <input
+                          data-cell-input={`${cfg.key}|${col}|${r}|${f}`}
+                          value={value}
+                          type="text"
+                          inputMode={isWeight ? 'decimal' : undefined}
+                          onChange={(e) => update(col, r, { [f]: e.target.value } as any)}
+                          onBlur={() => persist(col, r)}
+                          onKeyDown={(e) => handleKey(e, col, r, f)}
+                          title={isKwit && st.product_code ? `${st.product_code}${st.product_code_bot ? ' / ' + st.product_code_bot : ''} (${productName(st.product_code)})` : ''}
+                          className={`w-full px-1 py-1 text-[12px] border-0 outline-none bg-transparent focus:bg-yellow-100 focus:ring-2 focus:ring-blue-500 focus:ring-inset ${
+                            isWeight ? 'text-right text-green-800 font-semibold' :
+                            isKwit ? `font-semibold ${st.isUnknown ? 'text-red-700' : ''}` :
+                            'text-gray-700'
+                          }`}
+                        />
+                      </td>
+                    );
+                  }
+
+                  const cells: any[] = [
+                    fieldInput('top'),
+                    fieldInput('bot'),
+                  ];
+
+                  if (roadAfter !== undefined && colIdx === roadAfter - 1) {
+                    cells.push(
+                      <td key={`road-${r}-${sub}`} className="bg-gray-200 border border-gray-400" />
+                    );
+                  }
+
+                  return cells;
+                })}
+
+                {subIdx === 0 && (
+                  <th rowSpan={subRows.length} className="bg-gray-900 text-white w-9 text-center align-middle text-base font-bold border-l-2 border-gray-700">
+                    {r}
+                  </th>
+                )}
+              </tr>
+            ));
+          })}
         </tbody>
       </table>
-      <div className="text-xs text-gray-500 px-2 py-1 border-t bg-gray-50">
-        <strong>Skróty:</strong> ↓ jedzie kolumną w dół · ↑ w górę · → następne pole w prawo · ← w lewo ·
-        Tab / Enter = następne pole · Shift+Tab = wstecz · zapis automatyczny.
-        W KWIT wpisz np. <code className="bg-gray-200 px-1 rounded">S / PZ</code> żeby ustawić różne produkty na górze i dole.
+
+      <div className="text-xs text-gray-500 px-2 py-1.5 border-t bg-gray-50">
+        <strong>Skróty:</strong> ↓ kolumną w dół (KWIT → SKROBIA → WAGA → KWIT następnego rzędu) ·
+        ↑ w górę · → góra→dół tej samej kolumny → góra następnej · ← w lewo ·
+        Enter = pole niżej · Tab = pole w prawo · zapis automatyczny ·
+        W KWIT możesz wpisać różne produkty na górę i dół osobno.
       </div>
     </div>
   );

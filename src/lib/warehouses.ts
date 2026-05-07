@@ -7,8 +7,10 @@ export interface WarehouseConfig {
   cols?: string[];
   rows?: number;
   containers?: number;
-  // Indeks kolumny (0-based), po której jest droga (przerwa wizualna)
-  // np. roadAfter=4 oznacza: A,B,C,D,E | DROGA | F,G,H,I,J
+  // Indeks kolumny (1-based, tu liczone od pierwszej kolumny magazynu),
+  // po której wstawić "DROGĘ" jako specjalną kolumnę-magazyn z 2 miejscami paletowymi.
+  // np. roadAfter=5 oznacza: A,B,C,D,E | DROGA | F,G,H,I,J
+  // Droga ma podkolumny góra/dół jak normalna kolumna.
   roadAfter?: number;
   // Czy ostatni rząd to "Magazynek" (specjalny rząd przy wjeździe)
   hasMagazynek?: boolean;
@@ -18,13 +20,28 @@ export interface WarehouseConfig {
   noStarch?: boolean;
 }
 
+// Specjalny "key" kolumny dla drogi - traktowany jako zwykła kolumna magazynu
+// ale wyświetlany inaczej (szare tło, etykieta DROGA)
+export const ROAD_COL_KEY = 'DROGA';
+
 export const WAREHOUSES: Record<string, WarehouseConfig> = {
   lewa:    { key: 'lewa',    name: 'Magazyn Lewa Strona',  type: 'grid',    cols: ['A','B','C','D','E','F','G','H'], rows: 12 },
   prawa:   { key: 'prawa',   name: 'Magazyn Prawa Strona', type: 'grid',    cols: ['A','B','C','D','E','F','G','H'], rows: 10 },
-  blaszak1:{ key: 'blaszak1',name: 'Blaszak 1',            type: 'blaszak', cols: ['A','B','C','D','E','F','G','H','I','J'], rows: 5, containers: 6, roadAfter: 4, hasMagazynek: true, rowsReversed: true, noStarch: true },
-  blaszak2:{ key: 'blaszak2',name: 'Blaszak 2',            type: 'blaszak', cols: ['A','B','C','D','E','F','G','H','I','J'], rows: 8, containers: 6, roadAfter: 4, hasMagazynek: true, rowsReversed: true, noStarch: true },
-  wiata:   { key: 'wiata',   name: 'Wiata',                type: 'grid',    cols: ['A','B','C','D','E','F','G'], rows: 9, noStarch: true },
+  blaszak1:{ key: 'blaszak1',name: 'Blaszak 1',            type: 'blaszak', cols: ['A','B','C','D','E','F','G','H','I','J'], rows: 5, containers: 6, roadAfter: 5, hasMagazynek: true, rowsReversed: true, noStarch: true },
+  blaszak2:{ key: 'blaszak2',name: 'Blaszak 2',            type: 'blaszak', cols: ['A','B','C','D','E','F','G','H','I','J'], rows: 8, containers: 6, roadAfter: 5, hasMagazynek: true, rowsReversed: true, noStarch: true },
+  wiata:   { key: 'wiata',   name: 'Wiata',                type: 'grid',    cols: ['A','B','C','D','E','F','G'], rows: 13, noStarch: true },
   ambro:   { key: 'ambro',   name: 'Ambro (zewnętrzny)',   type: 'ambro' },
 };
 
 export const WAREHOUSE_KEYS = Object.keys(WAREHOUSES);
+
+// Helper - zwraca listę kolumn z wstawioną drogą jako specjalna kolumna 'DROGA'
+export function colsWithRoad(cfg: WarehouseConfig): string[] {
+  if (cfg.roadAfter === undefined || !cfg.cols) return cfg.cols ?? [];
+  const result: string[] = [];
+  for (let i = 0; i < cfg.cols.length; i++) {
+    result.push(cfg.cols[i]);
+    if (i === cfg.roadAfter - 1) result.push(ROAD_COL_KEY);
+  }
+  return result;
+}

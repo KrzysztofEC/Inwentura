@@ -166,7 +166,9 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
 
   type SubRow = 'kwit' | 'starch' | 'weight';
   type Side = 'top' | 'bot';
-  const SUB_ROWS: SubRow[] = cfg.noStarch ? ['kwit', 'weight'] : ['kwit', 'starch', 'weight'];
+  const SUB_ROWS: SubRow[] = cfg.middleRow ? ['kwit', 'starch', 'weight'] : ['kwit', 'weight'];
+  // Etykieta środkowego podwiersza ('SKROBIA' albo 'INFO')
+  const middleLabel = cfg.middleRow === 'info' ? 'INFO' : 'SKROBIA';
 
   function fieldOf(sub: SubRow, side: Side): Field {
     return `${sub}_${side}` as Field;
@@ -335,7 +337,7 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
                   </th>
                 )}
                 <th className="bg-gray-100 border border-gray-300 text-[10px] font-semibold uppercase text-gray-700 px-1">
-                  {sub === 'kwit' ? 'KWIT' : sub === 'starch' ? 'SKROBIA' : 'WAGA'}
+                  {sub === 'kwit' ? 'KWIT' : sub === 'starch' ? middleLabel : 'WAGA'}
                 </th>
 
                 {allCols.flatMap((col) => {

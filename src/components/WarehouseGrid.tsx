@@ -5,6 +5,7 @@ import { saveCell, clearCell } from '@/app/actions';
 import { parseProductCode, productName } from '@/lib/products';
 import type { Cell } from '@/types/db';
 import type { WarehouseConfig } from '@/lib/warehouses';
+import { ROAD_COL_KEY, colsWithRoad } from '@/lib/warehouses';
 
 type Field = 'kwit_top' | 'kwit_bot' | 'starch_top' | 'starch_bot' | 'weight_top' | 'weight_bot';
 
@@ -179,7 +180,7 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     e: React.KeyboardEvent<HTMLInputElement>,
     col: string, row: number, field: Field
   ) {
-    const cols = cfg.cols!;
+    const cols = colsWithRoad(cfg);
     const rows = cfg.rows!;
     const colIdx = cols.indexOf(col);
     const { sub, side } = parseField(field);
@@ -254,12 +255,15 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     return list;
   })();
 
-  const roadAfter = cfg.roadAfter;
+  // Lista wszystkich kolumn do renderowania (zawiera DROGA jeśli skonfigurowano)
+  const allCols = colsWithRoad(cfg);
 
-  function cellBgClass(st: CellState): string {
-    if (st.isUnknown) return 'bg-red-50';
-    if (st.product_code || st.weight_top || st.weight_bot) return 'bg-green-50';
-    return '';
+  function cellBgClass(st: CellState, isRoad: boolean): string {
+    if (st.isUnknown) return 'bg-red-100';
+    if (st.product_code || st.weight_top || st.weight_bot) {
+      return isRoad ? 'bg-yellow-100' : 'bg-green-50';
+    }
+    return isRoad ? 'bg-gray-200' : '';
   }
 
   return (
@@ -268,16 +272,10 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
         <colgroup>
           <col style={{ width: 36 }} />
           <col style={{ width: 70 }} />
-          {cfg.cols!.map((_, idx) => {
-            const cols: any[] = [
-              <col key={`g-${idx}`} style={{ width: 70 }} />,
-              <col key={`d-${idx}`} style={{ width: 70 }} />,
-            ];
-            if (roadAfter !== undefined && idx === roadAfter - 1) {
-              cols.push(<col key={`road-${idx}`} style={{ width: 30 }} />);
-            }
-            return cols;
-          }).flat()}
+          {allCols.flatMap((col, idx) => [
+            <col key={`g-${idx}`} style={{ width: col === ROAD_COL_KEY ? 60 : 70 }} />,
+            <col key={`d-${idx}`} style={{ width: col === ROAD_COL_KEY ? 60 : 70 }} />,
+          ])}
           <col style={{ width: 36 }} />
         </colgroup>
 
@@ -285,30 +283,28 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
           <tr>
             <th className="bg-gray-900 text-white"></th>
             <th className="bg-gray-900 text-white text-xs">DATA</th>
-            {cfg.cols!.flatMap((col, idx) => {
-              const headers: any[] = [
-                <th key={col} colSpan={2} className="bg-gray-900 text-white border border-gray-700 text-sm font-bold py-1">{col}</th>,
-              ];
-              if (roadAfter !== undefined && idx === roadAfter - 1) {
-                headers.push(<th key={`r-${idx}`} className="bg-gray-300"></th>);
-              }
-              return headers;
-            })}
+            {allCols.map((col) => (
+              <th key={col} colSpan={2} className={`text-sm font-bold py-1 border ${
+                col === ROAD_COL_KEY
+                  ? 'bg-gray-500 text-white border-gray-700'
+                  : 'bg-gray-900 text-white border-gray-700'
+              }`}>
+                {col}
+              </th>
+            ))}
             <th className="bg-gray-900 text-white"></th>
           </tr>
           <tr>
             <th className="bg-gray-900 text-white text-[10px]"></th>
             <th className="bg-gray-700 text-gray-200 text-[10px] font-normal"></th>
-            {cfg.cols!.flatMap((col, idx) => {
-              const headers: any[] = [
-                <th key={`${col}-g`} className="bg-gray-700 text-gray-200 font-normal text-[10px] border border-gray-600">góra</th>,
-                <th key={`${col}-d`} className="bg-gray-700 text-gray-200 font-normal text-[10px] border border-gray-600">dół</th>,
-              ];
-              if (roadAfter !== undefined && idx === roadAfter - 1) {
-                headers.push(<th key={`r-${idx}`} className="bg-gray-300 text-[9px] font-bold text-gray-700" style={{ writingMode: 'vertical-rl' }}>DROGA</th>);
-              }
-              return headers;
-            })}
+            {allCols.flatMap((col) => [
+              <th key={`${col}-g`} className={`font-normal text-[10px] border ${
+                col === ROAD_COL_KEY ? 'bg-gray-400 text-gray-100 border-gray-600' : 'bg-gray-700 text-gray-200 border-gray-600'
+              }`}>góra</th>,
+              <th key={`${col}-d`} className={`font-normal text-[10px] border ${
+                col === ROAD_COL_KEY ? 'bg-gray-400 text-gray-100 border-gray-600' : 'bg-gray-700 text-gray-200 border-gray-600'
+              }`}>dół</th>,
+            ])}
             <th className="bg-gray-700 text-gray-200 text-[10px] font-normal"></th>
           </tr>
         </thead>
@@ -320,7 +316,7 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
                 <tr key="magazynek">
                   <th className="bg-gray-900 text-white w-9 text-center align-middle text-xs">M</th>
                   <th className="bg-amber-100 border text-xs font-semibold">Magazynek</th>
-                  <td colSpan={cfg.cols!.length * 2 + (roadAfter !== undefined ? 1 : 0)} className="border bg-amber-50 text-xs italic text-gray-500 px-2">
+                  <td colSpan={allCols.length * 2} className="border bg-amber-50 text-xs italic text-gray-500 px-2">
                     (rząd specjalny - dane wpisuj jak zwykłe komórki magazynu w razie potrzeby)
                   </td>
                   <th className="bg-gray-900 text-white w-9 text-center align-middle text-xs">M</th>
@@ -342,10 +338,11 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
                   {sub === 'kwit' ? 'KWIT' : sub === 'starch' ? 'SKROBIA' : 'WAGA'}
                 </th>
 
-                {cfg.cols!.flatMap((col, colIdx) => {
+                {allCols.flatMap((col) => {
+                  const isRoad = col === ROAD_COL_KEY;
                   const key = `${col}|${r}`;
                   const st = states.get(key) ?? emptyState();
-                  const bg = cellBgClass(st);
+                  const bg = cellBgClass(st, isRoad);
 
                   function fieldInput(side: Side) {
                     const f = fieldOf(sub, side);
@@ -353,7 +350,7 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
                     const isWeight = sub === 'weight';
                     const isKwit = sub === 'kwit';
                     return (
-                      <td key={`${key}-${sub}-${side}`} className={`border border-gray-300 p-0 align-middle ${bg}`}>
+                      <td key={`${key}-${sub}-${side}`} className={`border ${isRoad ? 'border-gray-500' : 'border-gray-300'} p-0 align-middle ${bg}`}>
                         <input
                           data-cell-input={`${cfg.key}|${col}|${r}|${f}`}
                           value={value}
@@ -373,18 +370,7 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
                     );
                   }
 
-                  const cells: any[] = [
-                    fieldInput('top'),
-                    fieldInput('bot'),
-                  ];
-
-                  if (roadAfter !== undefined && colIdx === roadAfter - 1) {
-                    cells.push(
-                      <td key={`road-${r}-${sub}`} className="bg-gray-200 border border-gray-400" />
-                    );
-                  }
-
-                  return cells;
+                  return [fieldInput('top'), fieldInput('bot')];
                 })}
 
                 {subIdx === 0 && (
@@ -403,6 +389,7 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
         ↑ w górę · → góra→dół tej samej kolumny → góra następnej · ← w lewo ·
         Enter = pole niżej · Tab = pole w prawo · zapis automatyczny ·
         W KWIT możesz wpisać różne produkty na górę i dół osobno.
+        {cfg.roadAfter && <span className="ml-2"><strong>DROGA</strong> = kolumna zapasowa, edytowalna gdy magazyn pełny.</span>}
       </div>
     </div>
   );

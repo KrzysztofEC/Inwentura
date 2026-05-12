@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import { saveCell, clearCell } from '@/app/actions';
 import { parseProductCode, productName } from '@/lib/products';
 import type { Cell } from '@/types/db';
@@ -48,64 +48,159 @@ function fromCell(c: Cell | undefined): CellState {
   };
 }
 
+type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
+
 export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cell[] }) {
   const [states, setStates] = useState<Map<string, CellState>>(() => {
     const m = new Map<string, CellState>();
     for (const c of cells) m.set(`${c.col}|${c.row}`, fromCell(c));
     return m;
   });
-  // KLUCZOWE: trzymamy aktualny stan w ref, żeby persist czytał świeże dane
-  // (setState jest asynchroniczne, więc bez ref persist widziałby starszą wersję)
+  // statesRef = single source of truth, synchroniczny
   const statesRef = useRef(states);
-  statesRef.current = states;
 
-  const [, startTransition] = useTransition();
+  const [saveStatus, setSaveStatus] = useState<Map<string, SaveStatus>>(new Map());
+  const saveStatusRef = useRef(saveStatus);
+  saveStatusRef.current = saveStatus;
+
+  const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const inFlightRef = useRef<Set<string>>(new Set());
+  const retryRef = useRef<Set<string>>(new Set());
+
   const tableRef = useRef<HTMLTableElement>(null);
 
-  function persist(col: string, row: number) {
-    const key = `${col}|${row}`;
-    // CZYTAMY Z REF - to gwarantuje że mamy najświeższe dane
-    const st = statesRef.current.get(key);
-    if (!st || !st.dirty) return;
-
-    setStates((prev) => {
+  function setStatus(key: string, status: SaveStatus) {
+    setSaveStatus((prev) => {
       const m = new Map(prev);
-      m.set(key, { ...m.get(key)!, saving: true });
+      m.set(key, status);
       return m;
-    });
-
-    startTransition(async () => {
-      if (!st.raw_label && !st.starch && !st.weight_top && !st.weight_bot && !st.note) {
-        await clearCell({ warehouse: cfg.key, col, row });
-      } else {
-        await saveCell({
-          warehouse: cfg.key, col, row,
-          raw_label: st.raw_label,
-          starch: st.starch,
-          weight_top: st.weight_top,
-          weight_bot: st.weight_bot,
-          note: st.note,
-        });
-      }
-      setStates((prev) => {
-        const m = new Map(prev);
-        const cur = m.get(key);
-        if (!cur) return prev;
-        const parsed = parseProductCode(cur.raw_label);
-        m.set(key, {
-          ...cur, saving: false, dirty: false,
-          product_code: parsed.code,
-          product_code_bot: parsed.codeBot,
-          isUnknown: parsed.isUnknown,
-        });
-        return m;
-      });
     });
   }
 
+  async function doSave(col: string, row: number) {
+    const key = `${col}|${row}`;
+    if (inFlightRef.current.has(key)) {
+      retryRef.current.add(key);
+      return;
+    }
+    const st = statesRef.current.get(key);
+    if (!st || !st.dirty) return;
+
+    inFlightRef.current.add(key);
+    setStatus(key, 'saving');
+
+    const snapshot = {
+      raw_label: st.raw_label,
+      starch: st.starch,
+      weight_top: st.weight_top,
+      weight_bot: st.weight_bot,
+      note: st.note,
+    };
+
+    try {
+      if (!snapshot.raw_label && !snapshot.starch && !snapshot.weight_top && !snapshot.weight_bot && !snapshot.note) {
+        await clearCell({ warehouse: cfg.key, col, row });
+      } else {
+        const result = await saveCell({
+          warehouse: cfg.key, col, row,
+          ...snapshot,
+        });
+        if (!result.ok) throw new Error(result.error || 'save failed');
+      }
+
+      // CZYTAMY z statesRef (świeże dane)
+      const cur = statesRef.current.get(key);
+      if (cur) {
+        const stillSame =
+          cur.raw_label === snapshot.raw_label &&
+          cur.starch === snapshot.starch &&
+          cur.weight_top === snapshot.weight_top &&
+          cur.weight_bot === snapshot.weight_bot &&
+          cur.note === snapshot.note;
+        if (stillSame) {
+          const parsed = parseProductCode(cur.raw_label);
+          const cleaned: CellState = {
+            ...cur, saving: false, dirty: false,
+            product_code: parsed.code,
+            product_code_bot: parsed.codeBot,
+            isUnknown: parsed.isUnknown,
+          };
+          const newMap = new Map(statesRef.current);
+          newMap.set(key, cleaned);
+          statesRef.current = newMap;
+          setStates(newMap);
+        }
+      }
+
+      setStatus(key, 'saved');
+      setTimeout(() => {
+        if (saveStatusRef.current.get(key) === 'saved') setStatus(key, 'idle');
+      }, 1500);
+    } catch (e) {
+      setStatus(key, 'error');
+      console.error('Save error for', key, e);
+    } finally {
+      inFlightRef.current.delete(key);
+      if (retryRef.current.has(key)) {
+        retryRef.current.delete(key);
+        doSave(col, row);
+      }
+    }
+  }
+
+  function scheduleSave(col: string, row: number, immediate = false) {
+    const key = `${col}|${row}`;
+    const existing = timersRef.current.get(key);
+    if (existing) clearTimeout(existing);
+
+    setStatus(key, 'pending');
+
+    const delay = immediate ? 0 : 400;
+    const timer = setTimeout(() => {
+      timersRef.current.delete(key);
+      doSave(col, row);
+    }, delay);
+    timersRef.current.set(key, timer);
+  }
+
+  function flushAll() {
+    for (const [key, timer] of timersRef.current.entries()) {
+      clearTimeout(timer);
+      const [col, rowStr] = key.split('|');
+      doSave(col, parseInt(rowStr, 10));
+    }
+    timersRef.current.clear();
+    for (const [key, st] of statesRef.current.entries()) {
+      if (st.dirty && !inFlightRef.current.has(key)) {
+        const [col, rowStr] = key.split('|');
+        doSave(col, parseInt(rowStr, 10));
+      }
+    }
+  }
+
+  useEffect(() => {
+    function handler(e: BeforeUnloadEvent) {
+      let anyDirty = false;
+      for (const st of statesRef.current.values()) {
+        if (st.dirty) { anyDirty = true; break; }
+      }
+      if (anyDirty) {
+        flushAll();
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    }
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function persist(col: string, row: number) {
+    scheduleSave(col, row, true);
+  }
+
   function update(col: string, row: number, patch: Partial<CellState>) {
-    // KRYTYCZNE: Modyfikujemy statesRef NAJPIERW (synchronicznie),
-    // a React state ustawiamy potem (asynchronicznie, tylko dla UI).
+    // KRYTYCZNE: statesRef NAJPIERW (synchronicznie), state potem (dla UI).
     // Dzięki temu szybkie sekwencje update() nigdy nie tracą danych.
     const key = `${col}|${row}`;
     const cur = statesRef.current.get(key) ?? emptyState();
@@ -116,13 +211,10 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
       next.product_code_bot = parsed.codeBot;
       next.isUnknown = parsed.isUnknown;
     }
-    // Aktualizuj ref od razu - to jest źródło prawdy
     const newMap = new Map(statesRef.current);
     newMap.set(key, next);
     statesRef.current = newMap;
-    // React state dla re-renderu (asynchroniczny)
     setStates(newMap);
-    // Planuj zapis (debounced 400ms)
     scheduleSave(col, row, false);
   }
 
@@ -253,6 +345,7 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
 
   return (
     <div className="bg-white rounded shadow-sm overflow-x-auto">
+      <SaveBar states={states} saveStatus={saveStatus} flushAll={flushAll} />
       <table ref={tableRef} className="border-collapse w-full" style={{ tableLayout: 'fixed' }}>
         <colgroup>
           <col style={{ width: 36 }} />
@@ -326,8 +419,9 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
                     const key = `${col}|${r}`;
                     const st = states.get(key) ?? emptyState();
                     const bg = cellBgClass(st, isRoad);
+                    const status = saveStatus.get(key) ?? 'idle';
                     return (
-                      <td key={`${key}-kwit`} colSpan={2} className={`border ${isRoad ? 'border-gray-500' : 'border-gray-300'} p-0 align-middle ${bg}`}>
+                      <td key={`${key}-kwit`} colSpan={2} className={`border ${isRoad ? 'border-gray-500' : 'border-gray-300'} p-0 align-middle ${bg} relative`}>
                         <input
                           data-cell-input={`${cfg.key}|${col}|${r}|kwit`}
                           value={st.raw_label}
@@ -339,6 +433,19 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
                             st.isUnknown ? 'text-red-700' : ''
                           }`}
                         />
+                        {status !== 'idle' && (
+                          <span className={`absolute top-0 right-0.5 text-[8px] leading-none ${
+                            status === 'pending' ? 'text-gray-400' :
+                            status === 'saving' ? 'text-blue-500 animate-pulse' :
+                            status === 'saved'   ? 'text-green-600' :
+                            status === 'error'   ? 'text-red-600 font-bold' : ''
+                          }`} title={
+                            status === 'pending' ? 'oczekuje na zapis...' :
+                            status === 'saving' ? 'zapisuję...' :
+                            status === 'saved'   ? 'zapisano' :
+                            status === 'error'   ? 'BŁĄD ZAPISU - sprawdź połączenie' : ''
+                          }>●</span>
+                        )}
                       </td>
                     );
                   })}
@@ -420,6 +527,64 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
         <strong>Skróty:</strong> ↓↑ jeden rząd w pionie · →← w bok między polami · Enter = pole niżej · Tab = następne pole · zapis automatyczny.
         W KWIT wpisz <code className="bg-gray-200 px-1 rounded">K</code> = ten sam produkt na górze i dole; <code className="bg-gray-200 px-1 rounded">S / PZ</code> = S na górze, PZ na dole; <code className="bg-gray-200 px-1 rounded">K / 1580</code> = K z numerem kwitu 1580.
       </div>
+    </div>
+  );
+}
+
+function SaveBar({
+  states,
+  saveStatus,
+  flushAll,
+}: {
+  states: Map<string, CellState>;
+  saveStatus: Map<string, SaveStatus>;
+  flushAll: () => void;
+}) {
+  let dirty = 0;
+  let saving = 0;
+  let errors = 0;
+  for (const st of states.values()) if (st.dirty) dirty++;
+  for (const s of saveStatus.values()) {
+    if (s === 'saving') saving++;
+    else if (s === 'error') errors++;
+  }
+
+  const hasIssues = dirty > 0 || saving > 0 || errors > 0;
+  if (!hasIssues) {
+    return (
+      <div className="px-2 py-1 text-xs bg-green-50 border-b border-green-200 text-green-800 flex items-center gap-2">
+        <span className="w-2 h-2 rounded-full bg-green-500"></span>
+        Wszystkie zmiany zapisane
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-2 py-1 text-xs bg-yellow-50 border-b border-yellow-300 text-yellow-900 flex items-center gap-3 flex-wrap">
+      {saving > 0 && (
+        <span className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+          Zapisuję {saving}...
+        </span>
+      )}
+      {dirty > 0 && (
+        <span className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-full bg-yellow-500"></span>
+          Niesynchronizowanych: <strong>{dirty}</strong>
+        </span>
+      )}
+      {errors > 0 && (
+        <span className="flex items-center gap-1 text-red-700 font-semibold">
+          <span className="w-2 h-2 rounded-full bg-red-500"></span>
+          Błędy: {errors}
+        </span>
+      )}
+      <button
+        onClick={flushAll}
+        className="ml-auto bg-blue-600 hover:bg-blue-700 text-white px-2 py-0.5 rounded text-[11px] font-semibold"
+      >
+        💾 Wymuś zapis teraz
+      </button>
     </div>
   );
 }

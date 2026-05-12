@@ -56,7 +56,6 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     for (const c of cells) m.set(`${c.col}|${c.row}`, fromCell(c));
     return m;
   });
-  // statesRef = single source of truth, synchroniczny
   const statesRef = useRef(states);
 
   const [saveStatus, setSaveStatus] = useState<Map<string, SaveStatus>>(new Map());
@@ -108,7 +107,6 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
         if (!result.ok) throw new Error(result.error || 'save failed');
       }
 
-      // CZYTAMY z statesRef (świeże dane)
       const cur = statesRef.current.get(key);
       if (cur) {
         const stillSame =
@@ -200,8 +198,6 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
   }
 
   function update(col: string, row: number, patch: Partial<CellState>) {
-    // KRYTYCZNE: statesRef NAJPIERW (synchronicznie), state potem (dla UI).
-    // Dzięki temu szybkie sekwencje update() nigdy nie tracą danych.
     const key = `${col}|${row}`;
     const cur = statesRef.current.get(key) ?? emptyState();
     const next = { ...cur, ...patch, dirty: true };
@@ -245,6 +241,21 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     const colIdx = cols.indexOf(col);
     const fieldIdx = FIELDS.indexOf(field);
 
+    // W blaszakach numery rzędów są wyświetlane w odwrotnej kolejności (5,4,3,2,1).
+    // "W dół wizualnie" oznacza wtedy zmniejszenie numeru rzędu, nie zwiększenie.
+    function rowDown(r: number): number | null {
+      if (cfg.rowsReversed) {
+        return r > 1 ? r - 1 : null;
+      }
+      return r < rows ? r + 1 : null;
+    }
+    function rowUp(r: number): number | null {
+      if (cfg.rowsReversed) {
+        return r < rows ? r + 1 : null;
+      }
+      return r > 1 ? r - 1 : null;
+    }
+
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       persist(col, row);
@@ -254,7 +265,8 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
       } else if (field === 'starch') {
         focusInput(col, row, 'weight_top');
       } else if (field === 'weight_top' || field === 'weight_bot') {
-        if (row < rows) focusInput(col, row + 1, 'kwit');
+        const nextRow = rowDown(row);
+        if (nextRow !== null) focusInput(col, nextRow, 'kwit');
       }
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
@@ -265,7 +277,8 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
       } else if (field === 'starch') {
         focusInput(col, row, 'kwit');
       } else if (field === 'kwit') {
-        if (row > 1) focusInput(col, row - 1, 'weight_top');
+        const prevRow = rowUp(row);
+        if (prevRow !== null) focusInput(col, prevRow, 'weight_top');
       }
     } else if (e.key === 'ArrowRight') {
       e.preventDefault();
@@ -296,7 +309,8 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
       } else if (field === 'starch') {
         focusInput(col, row, 'weight_top');
       } else if (field === 'weight_top' || field === 'weight_bot') {
-        if (row < rows) focusInput(col, row + 1, 'kwit');
+        const nextRow = rowDown(row);
+        if (nextRow !== null) focusInput(col, nextRow, 'kwit');
       }
     } else if (e.key === 'Tab') {
       e.preventDefault();
@@ -306,16 +320,18 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
           focusInput(col, row, FIELDS[fieldIdx - 1]);
         } else if (colIdx > 0) {
           focusInput(cols[colIdx - 1], row, FIELDS[FIELDS.length - 1]);
-        } else if (row > 1) {
-          focusInput(cols[cols.length - 1], row - 1, FIELDS[FIELDS.length - 1]);
+        } else {
+          const prevRow = rowUp(row);
+          if (prevRow !== null) focusInput(cols[cols.length - 1], prevRow, FIELDS[FIELDS.length - 1]);
         }
       } else {
         if (fieldIdx < FIELDS.length - 1) {
           focusInput(col, row, FIELDS[fieldIdx + 1]);
         } else if (colIdx < cols.length - 1) {
           focusInput(cols[colIdx + 1], row, FIELDS[0]);
-        } else if (row < rows) {
-          focusInput(cols[0], row + 1, FIELDS[0]);
+        } else {
+          const nextRow = rowDown(row);
+          if (nextRow !== null) focusInput(cols[0], nextRow, FIELDS[0]);
         }
       }
     } else if (e.key === 'Escape') {

@@ -104,22 +104,26 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
   }
 
   function update(col: string, row: number, patch: Partial<CellState>) {
-    setStates((prev) => {
-      const m = new Map(prev);
-      const cur = m.get(`${col}|${row}`) ?? emptyState();
-      const next = { ...cur, ...patch, dirty: true };
-      if ('raw_label' in patch) {
-        const parsed = parseProductCode(next.raw_label);
-        next.product_code = parsed.code;
-        next.product_code_bot = parsed.codeBot;
-        next.isUnknown = parsed.isUnknown;
-      }
-      m.set(`${col}|${row}`, next);
-      // Aktualizujemy też ref od razu, synchronicznie - żeby persist
-      // wywołany zaraz po update widział nową wartość
-      statesRef.current = m;
-      return m;
-    });
+    // KRYTYCZNE: Modyfikujemy statesRef NAJPIERW (synchronicznie),
+    // a React state ustawiamy potem (asynchronicznie, tylko dla UI).
+    // Dzięki temu szybkie sekwencje update() nigdy nie tracą danych.
+    const key = `${col}|${row}`;
+    const cur = statesRef.current.get(key) ?? emptyState();
+    const next = { ...cur, ...patch, dirty: true };
+    if ('raw_label' in patch) {
+      const parsed = parseProductCode(next.raw_label);
+      next.product_code = parsed.code;
+      next.product_code_bot = parsed.codeBot;
+      next.isUnknown = parsed.isUnknown;
+    }
+    // Aktualizuj ref od razu - to jest źródło prawdy
+    const newMap = new Map(statesRef.current);
+    newMap.set(key, next);
+    statesRef.current = newMap;
+    // React state dla re-renderu (asynchroniczny)
+    setStates(newMap);
+    // Planuj zapis (debounced 400ms)
+    scheduleSave(col, row, false);
   }
 
   function focusInput(col: string, row: number, field: Field) {

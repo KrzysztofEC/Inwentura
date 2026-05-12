@@ -122,22 +122,36 @@ export interface ParsedProduct {
   isUnknown: boolean;
 }
 
+// Parsuje pojedynczą część (jedną stronę z góra/dół)
+function parsePart(s: string): { code: string | null; isUnknown: boolean } {
+  if (!s) return { code: null, isUnknown: false };
+  // Sama liczba = zwykła Kostka K
+  if (/^\d+$/.test(s)) return { code: 'K', isUnknown: false };
+  const norm = normalize(s);
+  if (ALIASES[norm]) return { code: ALIASES[norm], isUnknown: false };
+  return { code: 'UNKNOWN', isUnknown: true };
+}
+
 export function parseProductCode(raw: string | null | undefined): ParsedProduct {
   if (!raw || !raw.toString().trim()) return { code: null, codeBot: null, kwit: null, isUnknown: false };
   const s = raw.toString().trim();
 
   if (s.includes('/')) {
     const [first, second] = s.split('/', 2).map((p) => p.trim());
-    const firstParsed = parseProductCode(first);
-    if (/^\d+$/.test(second)) {
-      return { code: firstParsed.code, codeBot: null, kwit: second, isUnknown: firstParsed.isUnknown };
-    }
-    const secondParsed = parseProductCode(second);
+    // Każda część jest produktem (osobno górą i dołem):
+    //   - sama liczba (np. "1580") = zwykła Kostka K
+    //   - alias produktu (np. "KBIO", "S") = ten produkt
+    const firstCode = parsePart(first);
+    const secondCode = parsePart(second);
+    // Zbierz kwit z którejkolwiek części która jest liczbą
+    const kwitParts: string[] = [];
+    if (/^\d+$/.test(first)) kwitParts.push(first);
+    if (/^\d+$/.test(second)) kwitParts.push(second);
     return {
-      code: firstParsed.code,
-      codeBot: secondParsed.code,
-      kwit: null,
-      isUnknown: firstParsed.isUnknown || secondParsed.isUnknown,
+      code: firstCode.code,
+      codeBot: secondCode.code,
+      kwit: kwitParts.length > 0 ? kwitParts.join(' / ') : null,
+      isUnknown: firstCode.isUnknown || secondCode.isUnknown,
     };
   }
 

@@ -54,12 +54,18 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     for (const c of cells) m.set(`${c.col}|${c.row}`, fromCell(c));
     return m;
   });
+  // KLUCZOWE: trzymamy aktualny stan w ref, żeby persist czytał świeże dane
+  // (setState jest asynchroniczne, więc bez ref persist widziałby starszą wersję)
+  const statesRef = useRef(states);
+  statesRef.current = states;
+
   const [, startTransition] = useTransition();
   const tableRef = useRef<HTMLTableElement>(null);
 
   function persist(col: string, row: number) {
     const key = `${col}|${row}`;
-    const st = states.get(key);
+    // CZYTAMY Z REF - to gwarantuje że mamy najświeższe dane
+    const st = statesRef.current.get(key);
     if (!st || !st.dirty) return;
 
     setStates((prev) => {
@@ -109,6 +115,9 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
         next.isUnknown = parsed.isUnknown;
       }
       m.set(`${col}|${row}`, next);
+      // Aktualizujemy też ref od razu, synchronicznie - żeby persist
+      // wywołany zaraz po update widział nową wartość
+      statesRef.current = m;
       return m;
     });
   }

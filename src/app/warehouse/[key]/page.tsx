@@ -68,10 +68,14 @@ export default async function WarehousePage({ params }: { params: Promise<{ key:
         <main className="p-4">
           <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
             <h1 className="text-2xl font-semibold">Kontenery</h1>
-            <Link href="/print/kontenery" target="_blank"
-              className="bg-gray-200 hover:bg-gray-300 px-3 py-2 rounded text-sm no-print">
-              🖨 Drukuj
-            </Link>
+           <Link href="/print/kontenery" target="_blank"
+  className="bg-gray-200 hover:bg-gray-300 px-3 py-2 rounded text-sm no-print">
+  🖨 Drukuj wypełnioną
+</Link>
+<Link href="/print/kontenery?empty=1" target="_blank"
+  className="bg-gray-200 hover:bg-gray-300 px-3 py-2 rounded text-sm no-print">
+  📄 Drukuj pustą
+</Link>
           </div>
           <div className="grid gap-3 md:grid-cols-2">
             {containers.map((lines, i) => (

@@ -39,25 +39,89 @@ export default async function PrintPage({
     return <PrintAmbro cfg={cfg} entries={entries} today={todayStr} empty={empty} />;
   }
 
+  if (cfg.type === 'kontenery') {
+    let containers: Container[][] = [];
+    if (!empty) {
+      const { data } = await supabase
+        .from('containers').select('*')
+        .eq('warehouse', 'blaszak1')
+        .order('container_no').order('line_no');
+      for (let n = 1; n <= 6; n++) {
+        containers.push(((data ?? []) as Container[]).filter((c) => c.container_no === n));
+      }
+    } else {
+      for (let n = 1; n <= 6; n++) containers.push([]);
+    }
+    return <PrintKontenery containers={containers} today={todayStr} empty={empty} />;
+  }
+
   let cells: Cell[] = [];
-  let containers: Container[][] = [];
   if (!empty) {
     const { data } = await supabase.from('cells').select('*').eq('warehouse', key);
     cells = (data ?? []) as Cell[];
-    if (cfg.type === 'blaszak') {
-      const { data: cdata } = await supabase
-        .from('containers').select('*')
-        .eq('warehouse', key)
-        .order('container_no').order('line_no');
-      for (let n = 1; n <= cfg.containers!; n++) {
-        containers.push(((cdata ?? []) as Container[]).filter((c) => c.container_no === n));
-      }
-    }
-  } else if (cfg.type === 'blaszak') {
-    for (let n = 1; n <= cfg.containers!; n++) containers.push([]);
   }
 
-  return <PrintGrid cfg={cfg} cells={cells} containers={containers} today={todayStr} empty={empty} />;
+  return <PrintGrid cfg={cfg} cells={cells} containers={[]} today={todayStr} empty={empty} />;
+}
+
+function PrintKontenery({ containers, today, empty }: { containers: Container[][], today: string, empty: boolean }) {
+  const EMPTY_ROWS = 4;
+  return (
+    <div className="p-2 print-page">
+      <PrintStyles />
+      <PrintAutoLaunch />
+      <div className="print-header">
+        <div className="left"><b>DATA:</b> {today}</div>
+        <div className="title">KONTENERY {empty && <span className="empty-tag">(pusty szablon)</span>}</div>
+        <div className="right"></div>
+      </div>
+
+      <div className="kontenery-grid">
+        {containers.map((lines, i) => {
+          const cnum = i + 1;
+          const rowsToShow = empty
+            ? Array(EMPTY_ROWS).fill(null)
+            : lines.length > 0
+              ? [...lines, ...Array(Math.max(0, 2 - lines.length)).fill(null)]
+              : Array(EMPTY_ROWS).fill(null);
+
+          return (
+            <div key={cnum} className="kontener-box">
+              <div className="kontener-title">Kontener {cnum}</div>
+              <table className="container-print">
+                <thead>
+                  <tr>
+                    <th style={{ width: '30%' }}>Produkt</th>
+                    <th style={{ width: '15%' }}>Palety</th>
+                    <th style={{ width: '20%' }}>Waga (kg)</th>
+                    <th style={{ width: '35%' }}>Opis / Klient</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rowsToShow.map((ln: Container | null, idx: number) => (
+                    <tr key={idx}>
+                      <td className="data-cell">{ln?.raw_label ?? ''}</td>
+                      <td className="data-cell">{ln?.pallets ?? ''}</td>
+                      <td className="data-cell text-right">{ln ? fmt(ln.weight) : ''}</td>
+                      <td className="data-cell">{ln?.description ?? ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="legend" style={{ marginTop: '6px' }}>
+        <strong>Legenda:</strong>{' '}
+        <span>K=Kostka</span> · <span>KD=Kostka duża</span> · <span>KC=Kostka C</span> · <span>KB=Kostka B</span> ·
+        <span>KO=Kostka odsort</span> · <span>OK=Odzysk Kostka</span> · <span>S=Semolina</span> · <span>SR=Semolina SR</span> ·
+        <span>SPG=Semolina po grysie</span> · <span>G=Grys</span> · <span>GR=Granulat</span> · <span>P=Proszek</span> ·
+        <span>PŻ=Proszek żółty</span> · warianty z dopiskiem <strong>BIO</strong> lub <strong>BB</strong>
+      </div>
+    </div>
+  );
 }
 
 function splitTopBot(s: string | null | undefined): { top: string; bot: string } {
@@ -150,24 +214,14 @@ function PrintGrid({ cfg, cells, containers, today, empty }: any) {
                   const isRoad = col === ROAD_COL_KEY;
                   const c = map.get(`${col}|${r}`);
                   const tds: any[] = [];
-
                   if (sub === 'kwit') {
-                    tds.push(
-                      <td key={`${col}-${r}-k`} colSpan={2} className={isRoad ? 'lbl road-bg' : 'lbl'}>
-                        {c?.raw_label ?? ''}
-                      </td>
-                    );
+                    tds.push(<td key={`${col}-${r}-k`} colSpan={2} className={isRoad ? 'lbl road-bg' : 'lbl'}>{c?.raw_label ?? ''}</td>);
                   } else if (sub === 'starch') {
-                    tds.push(
-                      <td key={`${col}-${r}-s`} colSpan={2} className={isRoad ? 'info road-bg' : 'info'}>
-                        {c?.starch ?? ''}
-                      </td>
-                    );
+                    tds.push(<td key={`${col}-${r}-s`} colSpan={2} className={isRoad ? 'info road-bg' : 'info'}>{c?.starch ?? ''}</td>);
                   } else {
                     tds.push(<td key={`${col}-${r}-w-t`} className={isRoad ? 'w road-bg' : 'w'}>{fmt(c?.weight_top)}</td>);
                     tds.push(<td key={`${col}-${r}-w-b`} className={isRoad ? 'w road-bg' : 'w'}>{fmt(c?.weight_bot)}</td>);
                   }
-
                   return tds;
                 })}
                 {subIdx === 0 && (
@@ -178,8 +232,6 @@ function PrintGrid({ cfg, cells, containers, today, empty }: any) {
           })}
         </tbody>
       </table>
-
-      
 
       <div className="legend">
         <strong>Legenda:</strong>{' '}
@@ -243,39 +295,4 @@ function PrintStyles() {
       .print-grid th, .print-grid td { border: 1px solid black; padding: 1px 2px; text-align: center; vertical-align: middle; overflow: hidden; }
       .print-grid th.colhead { background: #1f2937; color: white; font-weight: 700; font-size: 11px; padding: 2px; }
       .print-grid th.sub { background: #e5e7eb; font-weight: 400; font-size: 8px; padding: 1px; }
-      .print-grid td.rownum { background: #1f2937; color: white; font-weight: 700; text-align: center; font-size: 12px; }
-      .print-grid td.sub-label { background: #f3f4f6; font-weight: 600; font-size: 8px; text-transform: uppercase; color: #444; }
-      .print-grid td.lbl { font-size: 11px; font-weight: 700; height: 18px; }
-      .print-grid td.info { font-size: 10px; color: #444; height: 16px; }
-      .print-grid td.w { font-size: 11px; font-weight: 700; height: 18px; }
-      .print-grid tr.row-start td { border-top: 2px solid black; }
-
-      .print-grid td.road-cell, .print-grid th.road-head { background: #d1d5db; }
-      .print-grid th.road-head { background: #6b7280; color: white; }
-      .print-grid th.road-sub { background: #9ca3af; color: white; }
-      .print-grid td.road-bg { background: #f3f4f6; }
-      .print-grid td.magazynek-cell { background: #fef9c3; height: 22px; }
-
-      .containers-title { margin: 6px 0 2px; font-size: 11px; font-weight: 700; }
-      .container-print { width: 100%; border-collapse: collapse; font-size: 9px; }
-      .container-print th, .container-print td { border: 1px solid black; padding: 2px 4px; }
-      .container-print th { background: #fde68a; }
-      .container-print td.cnum { background: #fef3c7; font-weight: 700; text-align: center; width: 24px; }
-      .container-print td.empty-row { height: 14px; }
-      .container-print .text-right { text-align: right; }
-
-      .ambro-print { width: 100%; border-collapse: collapse; font-size: 10px; }
-      .ambro-print th, .ambro-print td { border: 1px solid black; padding: 3px 5px; }
-      .ambro-print th { background: #e5e7eb; }
-      .ambro-print tr.empty td { height: 22px; }
-      .ambro-print .text-right { text-align: right; }
-
-      .legend { font-size: 7px; margin-top: 4px; line-height: 1.3; color: #333; }
-      .legend span { white-space: nowrap; }
-
-      @media print {
-        body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-      }
-    `}</style>
-  );
-}
+      .print-grid td.rownum { background: #1f2937; color: white; font-weight: 700; text-align:

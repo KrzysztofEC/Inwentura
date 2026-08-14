@@ -179,35 +179,7 @@ function PrintGrid({ cfg, cells, containers, today, empty }: any) {
         </tbody>
       </table>
 
-      {cfg.type === 'blaszak' && (
-        <>
-          <h3 className="containers-title">Kontenery</h3>
-          <table className="container-print">
-            <thead>
-              <tr><th>Nr</th><th>Kod</th><th>Palety</th><th>Waga</th><th>Opis</th></tr>
-            </thead>
-            <tbody>
-              {containers.map((lines: Container[], i: number) => {
-                const cnum = i + 1;
-                if (lines.length === 0) {
-                  return (
-                    <tr key={cnum}><td className="cnum">{cnum}</td><td className="empty-row"></td><td></td><td></td><td></td></tr>
-                  );
-                }
-                return lines.map((ln, idx) => (
-                  <tr key={`${cnum}-${idx}`}>
-                    {idx === 0 && <td rowSpan={lines.length} className="cnum">{cnum}</td>}
-                    <td>{ln.raw_label ?? ''}</td>
-                    <td>{ln.pallets ?? ''}</td>
-                    <td className="text-right">{fmt(ln.weight)}</td>
-                    <td>{ln.description ?? ''}</td>
-                  </tr>
-                ));
-              })}
-            </tbody>
-          </table>
-        </>
-      )}
+      
 
       <div className="legend">
         <strong>Legenda:</strong>{' '}

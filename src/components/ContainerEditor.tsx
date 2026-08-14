@@ -64,15 +64,17 @@ export function ContainerEditor({
   }
 
   return (
-    <div className="bg-white rounded shadow-sm p-4">
-      <h3 className="font-semibold mb-2">Kontener {containerNo}</h3>
+    <div className="rounded-lg p-4" style={{ background: '#1c2333', border: '1px solid #3d4a63' }}>
+      <h3 className="font-semibold mb-3 text-base" style={{ color: '#e2e8f0' }}>
+        Kontener {containerNo}
+      </h3>
       <table className="w-full text-sm">
-        <thead className="bg-amber-100">
-          <tr>
-            <th className="text-left px-2 py-1">Produkt</th>
-            <th className="text-left px-2 py-1 w-32">Palety</th>
-            <th className="text-left px-2 py-1 w-28">Waga (kg)</th>
-            <th className="text-left px-2 py-1">Opis</th>
+        <thead>
+          <tr style={{ background: '#232b3e', borderBottom: '2px solid #3d4a63' }}>
+            <th className="text-left px-2 py-2 font-semibold" style={{ color: '#94a3b8' }}>Produkt</th>
+            <th className="text-left px-2 py-2 font-semibold w-28" style={{ color: '#94a3b8' }}>Palety</th>
+            <th className="text-left px-2 py-2 font-semibold w-28" style={{ color: '#94a3b8' }}>Waga (kg)</th>
+            <th className="text-left px-2 py-2 font-semibold" style={{ color: '#94a3b8' }}>Opis / Klient</th>
             <th className="w-8"></th>
           </tr>
         </thead>
@@ -80,17 +82,22 @@ export function ContainerEditor({
           {lines.map((line, idx) => {
             const parsed = parseProductCode(line.raw_label ?? '');
             return (
-              <tr key={idx} className="border-t">
+              <tr key={idx} style={{ borderBottom: '1px solid #2d3748' }}>
                 <td className="p-1">
                   <input
                     value={line.raw_label ?? ''}
                     onChange={(e) => update(idx, { raw_label: e.target.value })}
                     onBlur={() => persist(idx)}
-                    className="w-full px-2 py-1 border rounded"
+                    className="w-full px-2 py-1.5 rounded outline-none"
+                    style={{
+                      background: '#0f1117',
+                      border: '1px solid #3d4a63',
+                      color: '#e2e8f0',
+                    }}
                     placeholder="np. K, GR, Granulat BIO"
                   />
                   {parsed.code && (
-                    <span className={`text-[10px] font-mono ${parsed.isUnknown ? 'text-red-600' : 'text-indigo-600'}`}>
+                    <span className="text-[10px] font-mono" style={{ color: parsed.isUnknown ? '#f87171' : '#818cf8' }}>
                       {parsed.code}{parsed.kwit ? ` · kwit ${parsed.kwit}` : ''}
                     </span>
                   )}
@@ -100,7 +107,12 @@ export function ContainerEditor({
                     value={line.pallets ?? ''}
                     onChange={(e) => update(idx, { pallets: e.target.value })}
                     onBlur={() => persist(idx)}
-                    className="w-full px-2 py-1 border rounded"
+                    className="w-full px-2 py-1.5 rounded outline-none"
+                    style={{
+                      background: '#0f1117',
+                      border: '1px solid #3d4a63',
+                      color: '#e2e8f0',
+                    }}
                   />
                 </td>
                 <td className="p-1">
@@ -109,7 +121,12 @@ export function ContainerEditor({
                     value={line.weight ?? ''}
                     onChange={(e) => update(idx, { weight: e.target.value ? Number(e.target.value) : null })}
                     onBlur={() => persist(idx)}
-                    className="w-full px-2 py-1 border rounded"
+                    className="w-full px-2 py-1.5 rounded outline-none text-right font-mono"
+                    style={{
+                      background: '#0f1117',
+                      border: '1px solid #3d4a63',
+                      color: '#38bdf8',
+                    }}
                   />
                 </td>
                 <td className="p-1">
@@ -117,14 +134,22 @@ export function ContainerEditor({
                     value={line.description ?? ''}
                     onChange={(e) => update(idx, { description: e.target.value })}
                     onBlur={() => persist(idx)}
-                    className="w-full px-2 py-1 border rounded"
+                    className="w-full px-2 py-1.5 rounded outline-none"
+                    style={{
+                      background: '#0f1117',
+                      border: '1px solid #3d4a63',
+                      color: '#34d399',
+                    }}
                   />
                 </td>
                 <td className="p-1 text-center">
                   <button
                     onClick={() => removeRow(idx)}
                     disabled={pending}
-                    className="text-red-600 hover:bg-red-50 rounded px-1"
+                    className="rounded px-1 py-1 transition-all"
+                    style={{ color: '#64748b' }}
+                    onMouseOver={e => (e.currentTarget.style.color = '#f87171')}
+                    onMouseOut={e => (e.currentTarget.style.color = '#64748b')}
                   >✖</button>
                 </td>
               </tr>
@@ -134,7 +159,12 @@ export function ContainerEditor({
       </table>
       <button
         onClick={addRow}
-        className="mt-2 text-sm bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded"
+        className="mt-3 text-sm px-3 py-1.5 rounded transition-all"
+        style={{
+          background: 'rgba(56,189,248,0.1)',
+          border: '1px solid rgba(56,189,248,0.25)',
+          color: '#38bdf8',
+        }}
       >+ dodaj wpis</button>
     </div>
   );

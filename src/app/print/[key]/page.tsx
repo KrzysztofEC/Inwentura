@@ -75,7 +75,6 @@ function PrintKontenery({ containers, today, empty }: { containers: Container[][
         <div className="title">KONTENERY {empty && <span className="empty-tag">(pusty szablon)</span>}</div>
         <div className="right"></div>
       </div>
-
       <div className="kontenery-grid">
         {containers.map((lines, i) => {
           const cnum = i + 1;
@@ -84,7 +83,6 @@ function PrintKontenery({ containers, today, empty }: { containers: Container[][
             : lines.length > 0
               ? [...lines, ...Array(Math.max(0, 2 - lines.length)).fill(null)]
               : Array(EMPTY_ROWS).fill(null);
-
           return (
             <div key={cnum} className="kontener-box">
               <div className="kontener-title">Kontener {cnum}</div>
@@ -112,54 +110,37 @@ function PrintKontenery({ containers, today, empty }: { containers: Container[][
           );
         })}
       </div>
-
       <div className="legend" style={{ marginTop: '6px' }}>
         <strong>Legenda:</strong>{' '}
         <span>K=Kostka</span> · <span>KD=Kostka duża</span> · <span>KC=Kostka C</span> · <span>KB=Kostka B</span> ·
-        <span>KO=Kostka odsort</span> · <span>OK=Odzysk Kostka</span> · <span>S=Semolina</span> · <span>SR=Semolina SR</span> ·
-        <span>SPG=Semolina po grysie</span> · <span>G=Grys</span> · <span>GR=Granulat</span> · <span>P=Proszek</span> ·
-        <span>PŻ=Proszek żółty</span> · warianty z dopiskiem <strong>BIO</strong> lub <strong>BB</strong>
+        <span>KO=Kostka odsort</span> · <span>S=Semolina</span> · <span>SR=Semolina SR</span> ·
+        <span>G=Grys</span> · <span>GR=Granulat</span> · <span>P=Proszek</span> ·
+        warianty z dopiskiem <strong>BIO</strong> lub <strong>BB</strong>
       </div>
     </div>
   );
 }
 
-function splitTopBot(s: string | null | undefined): { top: string; bot: string } {
-  if (!s) return { top: '', bot: '' };
-  if (s.includes('/')) {
-    const [first, second] = s.split('/', 2).map((x) => x.trim());
-    if (/^\d+$/.test(second)) return { top: s, bot: '' };
-    return { top: first, bot: second };
-  }
-  return { top: s, bot: '' };
-}
-
 function PrintGrid({ cfg, cells, containers, today, empty }: any) {
   const map = new Map<string, Cell>();
   for (const c of cells) map.set(`${c.col}|${c.row}`, c);
-
   const subRows = cfg.middleRow ? ['kwit', 'starch', 'weight'] : ['kwit', 'weight'];
   const middleLabel = cfg.middleRow === 'info' ? 'INFO' : 'SKROBIA';
   const subLabels: Record<string, string> = { kwit: 'KWIT', starch: middleLabel, weight: 'WAGA' };
-
   const rowNumbers: (number | 'M')[] = [];
   for (let i = 1; i <= cfg.rows; i++) rowNumbers.push(i);
   if (cfg.rowsReversed) rowNumbers.reverse();
   if (cfg.hasMagazynek) rowNumbers.push('M');
-
   const allCols = colsWithRoad(cfg);
-
   return (
     <div className="p-2 print-page">
       <PrintStyles />
       <PrintAutoLaunch />
-
       <div className="print-header">
         <div className="left"><b>DATA:</b> {today}</div>
         <div className="title">{cfg.name} {empty && <span className="empty-tag">(pusty szablon)</span>}</div>
         <div className="right">{cfg.key === 'prawa' ? 'WYJŚCIE EW.' : ''}</div>
       </div>
-
       <table className="print-grid">
         <colgroup>
           <col style={{ width: '3%' }} />
@@ -170,7 +151,6 @@ function PrintGrid({ cfg, cells, containers, today, empty }: any) {
           ])}
           <col style={{ width: '3%' }} />
         </colgroup>
-
         <thead>
           <tr>
             <th></th>
@@ -190,7 +170,6 @@ function PrintGrid({ cfg, cells, containers, today, empty }: any) {
             <th></th>
           </tr>
         </thead>
-
         <tbody>
           {rowNumbers.map((rNum) => {
             if (rNum === 'M') {
@@ -206,9 +185,7 @@ function PrintGrid({ cfg, cells, containers, today, empty }: any) {
             const r = rNum as number;
             return subRows.map((sub: string, subIdx: number) => (
               <tr key={`${r}-${sub}`} className={subIdx === 0 ? 'row-start' : ''}>
-                {subIdx === 0 && (
-                  <td rowSpan={subRows.length} className="rownum">{r}</td>
-                )}
+                {subIdx === 0 && <td rowSpan={subRows.length} className="rownum">{r}</td>}
                 <td className="sub-label">{subLabels[sub]}</td>
                 {allCols.flatMap((col: string) => {
                   const isRoad = col === ROAD_COL_KEY;
@@ -224,15 +201,12 @@ function PrintGrid({ cfg, cells, containers, today, empty }: any) {
                   }
                   return tds;
                 })}
-                {subIdx === 0 && (
-                  <td rowSpan={subRows.length} className="rownum">{r}</td>
-                )}
+                {subIdx === 0 && <td rowSpan={subRows.length} className="rownum">{r}</td>}
               </tr>
             ));
           })}
         </tbody>
       </table>
-
       <div className="legend">
         <strong>Legenda:</strong>{' '}
         <span>K=Kostka</span> · <span>KD=Kostka duża</span> · <span>KC=Kostka C</span> · <span>KB=Kostka B</span> ·
@@ -285,14 +259,40 @@ function PrintStyles() {
     <style>{`
       @page { size: A4 landscape; margin: 6mm; }
       .print-page { font-family: Arial, sans-serif; color: black; font-size: 9px; }
-
       .print-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 3px; border-bottom: 2px solid black; margin-bottom: 4px; }
       .print-header .title { font-weight: 700; font-size: 13px; text-transform: uppercase; }
       .print-header .left, .print-header .right { font-size: 10px; }
       .empty-tag { font-size: 9px; font-style: italic; font-weight: 400; }
-
       .print-grid { width: 100%; border-collapse: collapse; table-layout: fixed; }
       .print-grid th, .print-grid td { border: 1px solid black; padding: 1px 2px; text-align: center; vertical-align: middle; overflow: hidden; }
       .print-grid th.colhead { background: #1f2937; color: white; font-weight: 700; font-size: 11px; padding: 2px; }
       .print-grid th.sub { background: #e5e7eb; font-weight: 400; font-size: 8px; padding: 1px; }
-      .print-grid td.rownum { background: #1f2937; color: white; font-weight: 700; text-align:
+      .print-grid td.rownum { background: #1f2937; color: white; font-weight: 700; text-align: center; font-size: 12px; }
+      .print-grid td.sub-label { background: #f3f4f6; font-weight: 600; font-size: 8px; text-transform: uppercase; color: #444; }
+      .print-grid td.lbl { font-size: 11px; font-weight: 700; height: 18px; }
+      .print-grid td.info { font-size: 10px; color: #444; height: 16px; }
+      .print-grid td.w { font-size: 11px; font-weight: 700; height: 18px; }
+      .print-grid tr.row-start td { border-top: 2px solid black; }
+      .print-grid th.road-head { background: #6b7280; color: white; }
+      .print-grid th.road-sub { background: #9ca3af; color: white; }
+      .print-grid td.road-bg { background: #f3f4f6; }
+      .print-grid td.magazynek-cell { background: #fef9c3; height: 22px; }
+      .kontenery-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+      .kontener-box { border: 1px solid #333; border-radius: 2px; overflow: hidden; }
+      .kontener-title { background: #1f2937; color: white; font-weight: 700; font-size: 10px; padding: 3px 6px; }
+      .container-print { width: 100%; border-collapse: collapse; font-size: 9px; }
+      .container-print th { background: #e5e7eb; border: 1px solid #999; padding: 2px 4px; font-weight: 600; text-align: left; }
+      .container-print td { border: 1px solid #ccc; padding: 0; }
+      .container-print td.data-cell { height: 20px; padding: 2px 4px; }
+      .container-print .text-right { text-align: right; }
+      .ambro-print { width: 100%; border-collapse: collapse; font-size: 10px; }
+      .ambro-print th, .ambro-print td { border: 1px solid black; padding: 3px 5px; }
+      .ambro-print th { background: #e5e7eb; }
+      .ambro-print tr.empty td { height: 22px; }
+      .ambro-print .text-right { text-align: right; }
+      .legend { font-size: 7px; margin-top: 4px; line-height: 1.3; color: #333; }
+      .legend span { white-space: nowrap; }
+      @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+    `}</style>
+  );
+}

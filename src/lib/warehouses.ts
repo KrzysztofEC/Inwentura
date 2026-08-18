@@ -22,7 +22,6 @@ export const WAREHOUSES: Record<string, WarehouseConfig> = {
   ambro:      { key: 'ambro',      name: 'Ambro (zewnętrzny)',   type: 'ambro' },
 };
 export const WAREHOUSE_KEYS = Object.keys(WAREHOUSES);
-export const ROAD_COL_KEY = 'DROGA';
 export const ROAD_COL_1 = 'DROGA_1';
 export const ROAD_COL_2 = 'DROGA_2';
 

@@ -27,7 +27,10 @@ export function colsWithRoad(cfg: WarehouseConfig): string[] {
   const result: string[] = [];
   for (let i = 0; i < cfg.cols.length; i++) {
     result.push(cfg.cols[i]);
-    if (i === cfg.roadAfter - 1) result.push(ROAD_COL_KEY);
+    if (i === cfg.roadAfter - 1) {
+      result.push(ROAD_COL_KEY);
+      result.push(ROAD_COL_KEY);
+    }
   }
   return result;
 }

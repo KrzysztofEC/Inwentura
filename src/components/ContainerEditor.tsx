@@ -16,13 +16,17 @@ export function ContainerEditor({
   containerNo: number;
   initialLines: Container[];
 }) {
-  const padded = Array.from({ length: FIXED_ROWS }, (_, i) => initialLines[i] || {
-    id: 0, warehouse, container_no: containerNo, line_no: i + 1,
-    raw_label: '', product_code: null, pallets: '', weight: null, description: '', updated_at: '',
-  });
+  const hasExtra = initialLines.length > FIXED_ROWS;
+
+  const padded = Array.from({ length: hasExtra ? FIXED_ROWS + 1 : FIXED_ROWS }, (_, i) =>
+    initialLines[i] || {
+      id: 0, warehouse, container_no: containerNo, line_no: i + 1,
+      raw_label: '', product_code: null, pallets: '', weight: null, description: '', updated_at: '',
+    }
+  );
 
   const [lines, setLines] = useState<Container[]>(padded);
-  const [showExtra, setShowExtra] = useState(initialLines.length > FIXED_ROWS);
+  const [showExtra, setShowExtra] = useState(hasExtra);
   const [pending, startTransition] = useTransition();
 
   function update(idx: number, patch: Partial<Container>) {
@@ -52,17 +56,18 @@ export function ContainerEditor({
       id: 0, warehouse, container_no: containerNo, line_no: FIXED_ROWS + 1,
       raw_label: '', product_code: null, pallets: '', weight: null, description: '', updated_at: '',
     };
-    setLines((prev) => [...prev.slice(0, FIXED_ROWS), extra]);
+    setLines((prev) => {
+      const base = prev.slice(0, FIXED_ROWS);
+      return [...base, extra];
+    });
     setShowExtra(true);
   }
 
-  const visibleLines = showExtra ? lines.slice(0, FIXED_ROWS + 1) : lines.slice(0, FIXED_ROWS);
-
+  const visibleLines = showExtra ? lines : lines.slice(0, FIXED_ROWS);
   const rowBg = (idx: number) => idx % 2 === 0 ? '#f8fafc' : '#f1f5f9';
 
   return (
     <div className="rounded-lg overflow-hidden" style={{ background: '#ffffff', border: '1px solid #cbd5e1', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
-      {/* Header */}
       <div className="px-4 py-2.5 flex items-center justify-between" style={{ background: '#1e293b', borderBottom: '1px solid #334155' }}>
         <span className="font-semibold text-sm" style={{ color: '#f1f5f9' }}>Kontener {containerNo}</span>
         {!showExtra && (
@@ -74,7 +79,6 @@ export function ContainerEditor({
         )}
       </div>
 
-      {/* Table */}
       <table className="w-full text-sm">
         <thead>
           <tr style={{ background: '#e2e8f0', borderBottom: '1px solid #cbd5e1' }}>

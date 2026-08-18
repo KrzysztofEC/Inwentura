@@ -22,14 +22,18 @@ export const WAREHOUSES: Record<string, WarehouseConfig> = {
   ambro:      { key: 'ambro',      name: 'Ambro (zewnętrzny)',   type: 'ambro' },
 };
 export const WAREHOUSE_KEYS = Object.keys(WAREHOUSES);
+export const ROAD_COL_KEY = 'DROGA';
+export const ROAD_COL_1 = 'DROGA_1';
+export const ROAD_COL_2 = 'DROGA_2';
+
 export function colsWithRoad(cfg: WarehouseConfig): string[] {
   if (cfg.roadAfter === undefined || !cfg.cols) return cfg.cols ?? [];
   const result: string[] = [];
   for (let i = 0; i < cfg.cols.length; i++) {
     result.push(cfg.cols[i]);
     if (i === cfg.roadAfter - 1) {
-      result.push(ROAD_COL_KEY);
-      result.push(ROAD_COL_KEY);
+      result.push(ROAD_COL_1);
+      result.push(ROAD_COL_2);
     }
   }
   return result;

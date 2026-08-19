@@ -1,4 +1,3 @@
-
 import { createClient } from '@/lib/supabase/server';
 import { Topbar } from '@/components/Topbar';
 import { WAREHOUSES } from '@/lib/warehouses';
@@ -52,18 +51,17 @@ export default async function WarehousePage({ params }: { params: Promise<{ key:
     );
   }
 
-if (cfg.type === 'kontenery') {
-  const { data } = await supabase
-    .from('containers')
-    .select('*')
-    .eq('warehouse', 'kontenery')  // ← zmień z 'blaszak1' na 'kontenery'
-    .order('container_no')
-    .order('line_no');
-  // ...
-  containers.map((lines, i) => (
-    <ContainerEditor key={i + 1} warehouse="kontenery" containerNo={i + 1} initialLines={lines} />
-  //                                        ↑ zmień z 'blaszak1' na 'kontenery'
-  ))
+  if (cfg.type === 'kontenery') {
+    const { data } = await supabase
+      .from('containers')
+      .select('*')
+      .eq('warehouse', 'kontenery')
+      .order('container_no')
+      .order('line_no');
+    const containers: Container[][] = [];
+    for (let n = 1; n <= 6; n++) {
+      containers.push(((data ?? []) as Container[]).filter((c) => c.container_no === n));
+    }
     return (
       <>
         <Topbar user={user} />
@@ -83,7 +81,7 @@ if (cfg.type === 'kontenery') {
           </div>
           <div className="grid gap-3 md:grid-cols-2">
             {containers.map((lines, i) => (
-              <ContainerEditor key={i + 1} warehouse="blaszak1" containerNo={i + 1} initialLines={lines} />
+              <ContainerEditor key={i + 1} warehouse="kontenery" containerNo={i + 1} initialLines={lines} />
             ))}
           </div>
         </main>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
 import { saveContainer, deleteContainer } from '@/app/actions';
 import { parseProductCode } from '@/lib/products';
 import type { Container } from '@/types/db';
@@ -26,16 +26,37 @@ export function ContainerEditor({
   );
 
   const [lines, setLines] = useState<Container[]>(padded);
+  const linesRef = useRef<Container[]>(padded);
   const [showExtra, setShowExtra] = useState(hasExtra);
   const [pending, startTransition] = useTransition();
 
   function update(idx: number, patch: Partial<Container>) {
-    setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+    setLines((prev) => {
+      const next = prev.map((l, i) => (i === idx ? { ...l, ...patch } : l));
+      linesRef.current = next;
+      return next;
+    });
   }
 
   function persist(idx: number) {
-    const line = lines[idx];
-    if (!line.raw_label && !line.weight && !line.description && !line.pallets) return;
+    const line = linesRef.current[idx];
+    if (!line.raw_label && !line.weight && !line.description && !line.pallets) {
+      // Jeśli wiersz ma id — usuń go z bazy
+      if (line.id) {
+        startTransition(async () => {
+          await deleteContainer(line.id, warehouse);
+          setLines((prev) => {
+            const next = prev.map((l, i) => i === idx ? {
+              ...l, id: 0, raw_label: '', product_code: null,
+              pallets: '', weight: null, description: '',
+            } : l);
+            linesRef.current = next;
+            return next;
+          });
+        });
+      }
+      return;
+    }
     startTransition(async () => {
       const r = await saveContainer({
         id: line.id || undefined,
@@ -47,7 +68,13 @@ export function ContainerEditor({
         weight: line.weight ?? '',
         description: line.description ?? '',
       });
-      if (r.ok) update(idx, { id: r.id!, product_code: r.product_code ?? null });
+      if (r.ok) {
+        setLines((prev) => {
+          const next = prev.map((l, i) => i === idx ? { ...l, id: r.id!, product_code: r.product_code ?? null } : l);
+          linesRef.current = next;
+          return next;
+        });
+      }
     });
   }
 
@@ -57,8 +84,9 @@ export function ContainerEditor({
       raw_label: '', product_code: null, pallets: '', weight: null, description: '', updated_at: '',
     };
     setLines((prev) => {
-      const base = prev.slice(0, FIXED_ROWS);
-      return [...base, extra];
+      const next = [...prev.slice(0, FIXED_ROWS), extra];
+      linesRef.current = next;
+      return next;
     });
     setShowExtra(true);
   }

@@ -44,7 +44,7 @@ export default async function PrintPage({
     if (!empty) {
       const { data } = await supabase
         .from('containers').select('*')
-        .eq('warehouse', 'blaszak1')
+        .eq('warehouse', 'kontenery')
         .order('container_no').order('line_no');
       for (let n = 1; n <= 6; n++) {
         containers.push(((data ?? []) as Container[]).filter((c) => c.container_no === n));
@@ -61,7 +61,23 @@ export default async function PrintPage({
     cells = (data ?? []) as Cell[];
   }
 
-  return <PrintGrid cfg={cfg} cells={cells} containers={[]} today={todayStr} empty={empty} />;
+  // Dla Blaszaka 1 dołącz kontenery
+  let containers: Container[][] = [];
+  if (key === 'blaszak1') {
+    if (!empty) {
+      const { data } = await supabase
+        .from('containers').select('*')
+        .eq('warehouse', 'kontenery')
+        .order('container_no').order('line_no');
+      for (let n = 1; n <= 6; n++) {
+        containers.push(((data ?? []) as Container[]).filter((c) => c.container_no === n));
+      }
+    } else {
+      for (let n = 1; n <= 6; n++) containers.push([]);
+    }
+  }
+
+  return <PrintGrid cfg={cfg} cells={cells} containers={containers} today={todayStr} empty={empty} />;
 }
 
 function PrintKontenery({ containers, today, empty }: { containers: Container[][], today: string, empty: boolean }) {
@@ -121,6 +137,49 @@ function PrintKontenery({ containers, today, empty }: { containers: Container[][
   );
 }
 
+function KontenerySection({ containers }: { containers: Container[][] }) {
+  return (
+    <div style={{ marginTop: '10px' }}>
+      <div style={{ fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', borderBottom: '2px solid black', paddingBottom: '2px', marginBottom: '4px' }}>
+        Kontenery
+      </div>
+      <div className="kontenery-grid">
+        {containers.map((lines, i) => {
+          const cnum = i + 1;
+          const rowsToShow = lines.length > 0
+            ? [...lines, ...Array(Math.max(0, 2 - lines.length)).fill(null)]
+            : Array(3).fill(null);
+          return (
+            <div key={cnum} className="kontener-box">
+              <div className="kontener-title">Kontener {cnum}</div>
+              <table className="container-print">
+                <thead>
+                  <tr>
+                    <th style={{ width: '30%' }}>Produkt</th>
+                    <th style={{ width: '15%' }}>Palety</th>
+                    <th style={{ width: '20%' }}>Waga (kg)</th>
+                    <th style={{ width: '35%' }}>Opis / Klient</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rowsToShow.map((ln: Container | null, idx: number) => (
+                    <tr key={idx}>
+                      <td className="data-cell">{ln?.raw_label ?? ''}</td>
+                      <td className="data-cell">{ln?.pallets ?? ''}</td>
+                      <td className="data-cell text-right">{ln ? fmt(ln.weight) : ''}</td>
+                      <td className="data-cell">{ln?.description ?? ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function PrintGrid({ cfg, cells, containers, today, empty }: any) {
   const map = new Map<string, Cell>();
   for (const c of cells) map.set(`${c.col}|${c.row}`, c);
@@ -155,17 +214,19 @@ function PrintGrid({ cfg, cells, containers, today, empty }: any) {
           <tr>
             <th></th>
             <th></th>
-            {allCols.map((col: string) => (
-              <th key={col} colSpan={2} className={col === ROAD_COL_KEY ? 'colhead road-head' : 'colhead'}>{col}</th>
+            {allCols.map((col: string, idx: number) => (
+              <th key={idx} colSpan={2} className={col === ROAD_COL_KEY ? 'colhead road-head' : 'colhead'}>
+                {col === ROAD_COL_KEY ? 'DROGA' : col}
+              </th>
             ))}
             <th></th>
           </tr>
           <tr>
             <th></th>
             <th></th>
-            {allCols.flatMap((col: string) => [
-              <th key={`${col}-g`} className={col === ROAD_COL_KEY ? 'sub road-sub' : 'sub'}>góra</th>,
-              <th key={`${col}-d`} className={col === ROAD_COL_KEY ? 'sub road-sub' : 'sub'}>dół</th>,
+            {allCols.flatMap((col: string, idx: number) => [
+              <th key={`${idx}-g`} className={col === ROAD_COL_KEY ? 'sub road-sub' : 'sub'}>góra</th>,
+              <th key={`${idx}-d`} className={col === ROAD_COL_KEY ? 'sub road-sub' : 'sub'}>dół</th>,
             ])}
             <th></th>
           </tr>
@@ -187,17 +248,17 @@ function PrintGrid({ cfg, cells, containers, today, empty }: any) {
               <tr key={`${r}-${sub}`} className={subIdx === 0 ? 'row-start' : ''}>
                 {subIdx === 0 && <td rowSpan={subRows.length} className="rownum">{r}</td>}
                 <td className="sub-label">{subLabels[sub]}</td>
-                {allCols.flatMap((col: string) => {
+                {allCols.flatMap((col: string, idx: number) => {
                   const isRoad = col === ROAD_COL_KEY;
                   const c = map.get(`${col}|${r}`);
                   const tds: any[] = [];
                   if (sub === 'kwit') {
-                    tds.push(<td key={`${col}-${r}-k`} colSpan={2} className={isRoad ? 'lbl road-bg' : 'lbl'}>{c?.raw_label ?? ''}</td>);
+                    tds.push(<td key={`${idx}-${r}-k`} colSpan={2} className={isRoad ? 'lbl road-bg' : 'lbl'}>{c?.raw_label ?? ''}</td>);
                   } else if (sub === 'starch') {
-                    tds.push(<td key={`${col}-${r}-s`} colSpan={2} className={isRoad ? 'info road-bg' : 'info'}>{c?.starch ?? ''}</td>);
+                    tds.push(<td key={`${idx}-${r}-s`} colSpan={2} className={isRoad ? 'info road-bg' : 'info'}>{c?.starch ?? ''}</td>);
                   } else {
-                    tds.push(<td key={`${col}-${r}-w-t`} className={isRoad ? 'w road-bg' : 'w'}>{fmt(c?.weight_top)}</td>);
-                    tds.push(<td key={`${col}-${r}-w-b`} className={isRoad ? 'w road-bg' : 'w'}>{fmt(c?.weight_bot)}</td>);
+                    tds.push(<td key={`${idx}-${r}-w-t`} className={isRoad ? 'w road-bg' : 'w'}>{fmt(c?.weight_top)}</td>);
+                    tds.push(<td key={`${idx}-${r}-w-b`} className={isRoad ? 'w road-bg' : 'w'}>{fmt(c?.weight_bot)}</td>);
                   }
                   return tds;
                 })}
@@ -207,6 +268,11 @@ function PrintGrid({ cfg, cells, containers, today, empty }: any) {
           })}
         </tbody>
       </table>
+
+      {containers && containers.length > 0 && (
+        <KontenerySection containers={containers} />
+      )}
+
       <div className="legend">
         <strong>Legenda:</strong>{' '}
         <span>K=Kostka</span> · <span>KD=Kostka duża</span> · <span>KC=Kostka C</span> · <span>KB=Kostka B</span> ·
@@ -277,13 +343,13 @@ function PrintStyles() {
       .print-grid th.road-sub { background: #9ca3af; color: white; }
       .print-grid td.road-bg { background: #f3f4f6; }
       .print-grid td.magazynek-cell { background: #fef9c3; height: 22px; }
-      .kontenery-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+      .kontenery-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; }
       .kontener-box { border: 1px solid #333; border-radius: 2px; overflow: hidden; }
       .kontener-title { background: #1f2937; color: white; font-weight: 700; font-size: 10px; padding: 3px 6px; }
-      .container-print { width: 100%; border-collapse: collapse; font-size: 9px; }
-      .container-print th { background: #e5e7eb; border: 1px solid #999; padding: 2px 4px; font-weight: 600; text-align: left; }
+      .container-print { width: 100%; border-collapse: collapse; font-size: 8px; }
+      .container-print th { background: #e5e7eb; border: 1px solid #999; padding: 2px 3px; font-weight: 600; text-align: left; }
       .container-print td { border: 1px solid #ccc; padding: 0; }
-      .container-print td.data-cell { height: 20px; padding: 2px 4px; }
+      .container-print td.data-cell { height: 16px; padding: 1px 3px; }
       .container-print .text-right { text-align: right; }
       .ambro-print { width: 100%; border-collapse: collapse; font-size: 10px; }
       .ambro-print th, .ambro-print td { border: 1px solid black; padding: 3px 5px; }

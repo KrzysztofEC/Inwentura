@@ -93,20 +93,21 @@ export async function deleteContainer(id: number, warehouse: string) {
 }
 
 export async function saveAmbro(input: {
-  id?: number; raw_label?: string; weight?: any; kwit?: string;
-  issue_date?: string; receive_date?: string; notes?: string; extra?: string;
+  id?: number; raw_label?: string; kwit?: string;
+  wydanie_ambro?: any; przyjecie_ec?: any;
+  issue_date?: string; receive_date?: string; notes?: string;
 }) {
   const supabase = await createClient();
   const parsed = parseProductCode(input.raw_label ?? '');
   const payload: any = {
     raw_label: input.raw_label?.trim() || null,
     product_code: parsed.code,
-    weight: num(input.weight),
     kwit: input.kwit?.trim() || null,
+    wydanie_ambro: num(input.wydanie_ambro),
+    przyjecie_ec: num(input.przyjecie_ec),
     issue_date: input.issue_date || null,
     receive_date: input.receive_date || null,
     notes: input.notes?.trim() || null,
-    extra: input.extra?.trim() || null,
   };
   if (input.id) {
     const { data, error } = await supabase.from('ambro').update(payload).eq('id', input.id).select().single();

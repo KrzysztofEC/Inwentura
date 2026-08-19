@@ -39,6 +39,7 @@ export interface AmbroEntry {
   extra: string | null;
   wydanie_ambro: number | null;
   przyjecie_ec: number | null;
+  ilosc_palet: number | null;
   updated_at: string;
 }
 

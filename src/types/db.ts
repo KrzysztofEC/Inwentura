@@ -37,6 +37,8 @@ export interface AmbroEntry {
   receive_date: string | null;
   notes: string | null;
   extra: string | null;
+  wydanie_ambro: number | null;    // ← dodaj
+  przyjecie_ec: number | null;     // ← dodaj
   updated_at: string;
 }
 

@@ -52,17 +52,18 @@ export default async function WarehousePage({ params }: { params: Promise<{ key:
     );
   }
 
-  if (cfg.type === 'kontenery') {
-    const { data } = await supabase
-      .from('containers')
-      .select('*')
-      .eq('warehouse', 'blaszak1')
-      .order('container_no')
-      .order('line_no');
-    const containers: Container[][] = [];
-    for (let n = 1; n <= 6; n++) {
-      containers.push(((data ?? []) as Container[]).filter((c) => c.container_no === n));
-    }
+if (cfg.type === 'kontenery') {
+  const { data } = await supabase
+    .from('containers')
+    .select('*')
+    .eq('warehouse', 'kontenery')  // ← zmień z 'blaszak1' na 'kontenery'
+    .order('container_no')
+    .order('line_no');
+  // ...
+  containers.map((lines, i) => (
+    <ContainerEditor key={i + 1} warehouse="kontenery" containerNo={i + 1} initialLines={lines} />
+  //                                        ↑ zmień z 'blaszak1' na 'kontenery'
+  ))
     return (
       <>
         <Topbar user={user} />

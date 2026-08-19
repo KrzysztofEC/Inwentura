@@ -27,6 +27,7 @@ export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
         kwit: r.kwit ?? '',
         wydanie_ambro: r.wydanie_ambro ?? '',
         przyjecie_ec: r.przyjecie_ec ?? '',
+        ilosc_palet: r.ilosc_palet ?? '',
         issue_date: r.issue_date ?? '',
         receive_date: r.receive_date ?? '',
         notes: r.notes ?? '',
@@ -45,7 +46,7 @@ export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
     const newRow: AmbroEntry = {
       id: 0, raw_label: '', product_code: null, weight: null, kwit: '',
       issue_date: null, receive_date: null, notes: '', extra: '',
-      wydanie_ambro: null, przyjecie_ec: null, updated_at: '',
+      wydanie_ambro: null, przyjecie_ec: null, ilosc_palet: null, updated_at: '',
     };
     setRows((prev) => { const next = [...prev, newRow]; rowsRef.current = next; return next; });
   }
@@ -68,13 +69,14 @@ export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
 
   return (
     <div className="bg-white rounded shadow-sm overflow-x-auto">
-      <table className="w-full text-sm" style={{ minWidth: '900px' }}>
+      <table className="w-full text-sm" style={{ minWidth: '1000px' }}>
         <thead className="bg-gray-900 text-white">
           <tr>
             <th className="text-left p-2 w-32">Kod</th>
             <th className="text-center p-2 w-28">Waga Stan</th>
             <th className="text-left p-2 w-32">Wydanie do Ambro</th>
             <th className="text-left p-2 w-32">Przyjęcie do EC</th>
+            <th className="text-left p-2 w-24">Ilość Palet</th>
             <th className="text-left p-2 w-28">Nr KW</th>
             <th className="text-left p-2 w-28">Wydanie</th>
             <th className="text-left p-2 w-28">Przyjęcie EC</th>
@@ -146,6 +148,19 @@ export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
                     onBlur={() => persist(idx)}
                     className={numInputClass}
                     style={{ color: '#166534' }}
+                    placeholder="0"
+                  />
+                </td>
+
+                {/* ILOŚĆ PALET */}
+                <td className="p-1">
+                  <input
+                    type="number" step="any"
+                    value={r.ilosc_palet ?? ''}
+                    onChange={(e) => update(idx, { ilosc_palet: e.target.value ? Number(e.target.value) : null })}
+                    onBlur={() => persist(idx)}
+                    className={numInputClass}
+                    style={{ color: '#374151' }}
                     placeholder="0"
                   />
                 </td>

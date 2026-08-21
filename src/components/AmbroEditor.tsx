@@ -1,12 +1,11 @@
 'use client';
 
-import { useRef, useState, useTransition, useMemo } from 'react';
+import { useRef, useState, useTransition, useMemo, useCallback } from 'react';
 import { saveAmbro, deleteAmbro } from '@/app/actions';
 import { parseProductCode } from '@/lib/products';
 import type { AmbroEntry } from '@/types/db';
 
-// Rozszerzony typ z tymczasowym ID
-type AmbroRow = AmbroEntry & { _tmpId?: string };
+type AmbroRow = AmbroEntry & { _tmpId: string };
 
 let tmpCounter = 0;
 function newTmpId() { return `tmp-${++tmpCounter}`; }
@@ -36,7 +35,7 @@ function anyFieldMatches(r: AmbroRow, filter: string): boolean {
 }
 
 function rowKey(r: AmbroRow): string {
-  return r.id ? `id-${r.id}` : r._tmpId ?? 'unknown';
+  return r.id ? `id-${r.id}` : r._tmpId;
 }
 
 export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
@@ -45,25 +44,32 @@ export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
   const rowsRef = useRef<AmbroRow[]>(initRows);
   const [pending, startTransition] = useTransition();
   const [filter, setFilter] = useState('');
-  const focusedInputRef = useRef<string | null>(null);
+  // Timery debounce per wiersz
+  const saveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
-  function update(tmpOrId: string, patch: Partial<AmbroRow>) {
+  function update(rKey: string, patch: Partial<AmbroRow>) {
     setRows((prev) => {
-      const next = prev.map(r => rowKey(r) === tmpOrId ? { ...r, ...patch } : r);
+      const next = prev.map(r => rowKey(r) === rKey ? { ...r, ...patch } : r);
       rowsRef.current = next;
       return next;
     });
+    // Debounced save — zapisz 1.5s po ostatniej zmianie w tym wierszu
+    scheduleSave(rKey);
   }
 
-  function persist(rKey: string) {
+  function scheduleSave(rKey: string) {
+    const existing = saveTimers.current.get(rKey);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      saveTimers.current.delete(rKey);
+      doSave(rKey);
+    }, 1500);
+    saveTimers.current.set(rKey, timer);
+  }
+
+  function doSave(rKey: string) {
     const r = rowsRef.current.find(row => rowKey(row) === rKey);
     if (!r) return;
-
-    // Zapamiętaj aktywny input
-    const activeEl = document.activeElement as HTMLInputElement | null;
-    const activeInputId = activeEl?.dataset?.inputId ?? null;
-    focusedInputRef.current = activeInputId;
-
     startTransition(async () => {
       const res = await saveAmbro({
         id: r.id || undefined,
@@ -80,20 +86,20 @@ export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
         setRows((prev) => {
           const updated = prev.map(row =>
             rowKey(row) === rKey
-              ? { ...row, id: res.id!, _tmpId: row._tmpId, product_code: res.product_code ?? null }
+              ? { ...row, id: res.id!, product_code: res.product_code ?? null }
               : row
           );
-          const resorted = sortByDate(updated);
-          rowsRef.current = resorted;
-          return resorted;
+          // Sortujemy TYLKO jeśli data się zmieniła — sprawdzamy czy kolejność się zmieni
+          const needsSort = updated.some((row, i) => {
+            if (i === 0) return false;
+            const prev2 = updated[i - 1];
+            if (!prev2.issue_date || !row.issue_date) return false;
+            return prev2.issue_date > row.issue_date;
+          });
+          const result = needsSort ? sortByDate(updated) : updated;
+          rowsRef.current = result;
+          return result;
         });
-        // Przywróć fokus — używamy data-input-id który zawiera stały _tmpId lub id
-        if (focusedInputRef.current) {
-          setTimeout(() => {
-            const el = document.querySelector<HTMLInputElement>(`[data-input-id="${focusedInputRef.current}"]`);
-            if (el) { el.focus(); }
-          }, 30);
-        }
       }
     });
   }
@@ -111,32 +117,24 @@ export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
       rowsRef.current = next;
       return next;
     });
-    // Fokus na pierwsze pole nowego wiersza
     setTimeout(() => {
-      const el = document.querySelector<HTMLInputElement>(`[data-input-id="${tmpId}-kod"]`);
-      if (el) el.focus();
+      document.querySelector<HTMLInputElement>(`[data-input-id="${tmpId}-kod"]`)?.focus();
     }, 30);
   }
 
   function removeRow(rKey: string) {
+    const existing = saveTimers.current.get(rKey);
+    if (existing) clearTimeout(existing);
     const r = rowsRef.current.find(row => rowKey(row) === rKey);
     if (!r) return;
     if (r.id) {
       if (!confirm('Usunąć ten wpis?')) return;
       startTransition(async () => {
         await deleteAmbro(r.id);
-        setRows((prev) => {
-          const next = prev.filter(row => rowKey(row) !== rKey);
-          rowsRef.current = next;
-          return next;
-        });
+        setRows((prev) => { const next = prev.filter(row => rowKey(row) !== rKey); rowsRef.current = next; return next; });
       });
     } else {
-      setRows((prev) => {
-        const next = prev.filter(row => rowKey(row) !== rKey);
-        rowsRef.current = next;
-        return next;
-      });
+      setRows((prev) => { const next = prev.filter(row => rowKey(row) !== rKey); rowsRef.current = next; return next; });
     }
   }
 
@@ -149,7 +147,7 @@ export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
 
   return (
     <div className="flex flex-col" style={{ height: 'calc(100vh - 180px)' }}>
-      {/* GÓRNY PANEL — przyklejony */}
+      {/* GÓRNY PANEL */}
       <div className="flex-shrink-0 bg-white border-b">
         <div className="flex items-center gap-3 px-2 py-2 bg-gray-50 border-b">
           <div className="relative flex-1 max-w-sm">
@@ -161,13 +159,11 @@ export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
             />
             {filter && (
               <button onClick={() => setFilter('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">
-                ✕
-              </button>
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">✕</button>
             )}
           </div>
           {filter && <span className="text-xs text-gray-500">{filteredRows.length} z {rows.length} wpisów</span>}
-          <span className="text-xs text-gray-400 ml-auto">Sortowanie: data wydania ↑</span>
+          <span className="text-xs text-gray-400 ml-auto">Zapis automatyczny · Sortowanie: data wydania ↑</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm" style={{ minWidth: '1050px' }}>
@@ -207,7 +203,6 @@ export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
                     <input data-input-id={`${rKey}-kod`}
                       value={r.raw_label ?? ''}
                       onChange={(e) => update(rKey, { raw_label: e.target.value })}
-                      onBlur={() => persist(rKey)}
                       className={inputClass} placeholder="np. K, GR" />
                     {parsed.code && (
                       <span className={`text-[10px] font-mono ${parsed.isUnknown ? 'text-red-600' : 'text-indigo-600'}`}>
@@ -235,7 +230,6 @@ export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
                     <input data-input-id={`${rKey}-wydanie_ambro`}
                       type="number" step="any" value={r.wydanie_ambro ?? ''}
                       onChange={(e) => update(rKey, { wydanie_ambro: e.target.value ? Number(e.target.value) : null })}
-                      onBlur={() => persist(rKey)}
                       className={numInputClass} style={{ color: '#b45309' }} placeholder="0" />
                   </td>
 
@@ -243,7 +237,6 @@ export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
                     <input data-input-id={`${rKey}-przyjecie_ec`}
                       type="number" step="any" value={r.przyjecie_ec ?? ''}
                       onChange={(e) => update(rKey, { przyjecie_ec: e.target.value ? Number(e.target.value) : null })}
-                      onBlur={() => persist(rKey)}
                       className={numInputClass} style={{ color: '#166534' }} placeholder="0" />
                   </td>
 
@@ -251,7 +244,6 @@ export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
                     <input data-input-id={`${rKey}-ilosc_palet`}
                       type="number" step="any" value={r.ilosc_palet ?? ''}
                       onChange={(e) => update(rKey, { ilosc_palet: e.target.value ? Number(e.target.value) : null })}
-                      onBlur={() => persist(rKey)}
                       className={numInputClass} style={{ color: '#374151' }} placeholder="0" />
                   </td>
 
@@ -259,7 +251,6 @@ export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
                     <input data-input-id={`${rKey}-kwit`}
                       value={r.kwit ?? ''}
                       onChange={(e) => update(rKey, { kwit: e.target.value })}
-                      onBlur={() => persist(rKey)}
                       className={inputClass} placeholder="nr kwitu" />
                   </td>
 
@@ -267,7 +258,6 @@ export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
                     <input data-input-id={`${rKey}-wydanie_data`}
                       type="date" value={r.issue_date ?? ''}
                       onChange={(e) => update(rKey, { issue_date: e.target.value })}
-                      onBlur={() => persist(rKey)}
                       className={inputClass} />
                   </td>
 
@@ -275,7 +265,6 @@ export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
                     <input data-input-id={`${rKey}-przyjecie_data`}
                       type="date" value={r.receive_date ?? ''}
                       onChange={(e) => update(rKey, { receive_date: e.target.value })}
-                      onBlur={() => persist(rKey)}
                       className={inputClass} />
                   </td>
 
@@ -283,15 +272,12 @@ export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
                     <input data-input-id={`${rKey}-notes`}
                       value={r.notes ?? ''}
                       onChange={(e) => update(rKey, { notes: e.target.value })}
-                      onBlur={() => persist(rKey)}
                       className={inputClass} placeholder="uwagi" />
                   </td>
 
                   <td className="p-1 w-8 text-center">
                     <button onClick={() => removeRow(rKey)} disabled={pending}
-                      className="text-red-400 hover:text-red-600 hover:bg-red-50 rounded px-1 transition-all">
-                      ✖
-                    </button>
+                      className="text-red-400 hover:text-red-600 hover:bg-red-50 rounded px-1 transition-all">✖</button>
                   </td>
                 </tr>
               );

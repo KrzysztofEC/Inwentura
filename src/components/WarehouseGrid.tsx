@@ -283,14 +283,14 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     const road = isRoadCol(col);
     const key = `${col}|${row}`;
     const st = states.get(key) ?? emptyState();
-    const isSel = !road && selected.has(key);
+    const isSel = selected.has(key);
     const bg = cellBg(st, col, isSel);
     const border = road ? 'border-gray-500' : 'border-gray-300';
     return (
       <td key={tdKey} colSpan={colSpan} className={`border ${border} p-0 align-middle ${bg} relative`}>
         {renderInput(col, row, field)}
         {/* Nakładka TYLKO gdy Ctrl wciśnięty */}
-        {!road && ctrlHeld && (
+        {ctrlHeld && (
           <div
             className="absolute inset-0 z-20"
             style={{ cursor: 'crosshair', background: isSel ? 'rgba(59,130,246,0.15)' : 'transparent' }}

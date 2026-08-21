@@ -213,11 +213,10 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
   useEffect(() => {
     function handler(e: KeyboardEvent) {
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (selected.size === 0) return;
-        const target = e.target as HTMLElement;
-        if (target.tagName === 'INPUT') return;
-        e.preventDefault();
-        deleteSelected();
+  if (selected.size === 0) return;
+  e.preventDefault();
+  deleteSelected();
+}
       }
       if (e.key === 'Escape') { setSelected(new Set()); setPasteTarget(null); }
       // Ctrl+C — kopiuj

@@ -205,6 +205,7 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
         });
       }
     }
+    clipboardRef.current = null;
     setPasteTarget(null);
     setSelected(new Set());
   }, [allCols, numericRows, cfg.key]);

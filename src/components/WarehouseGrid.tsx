@@ -139,8 +139,9 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     function handler(e: KeyboardEvent) {
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selected.size === 0) return;
-        const target = e.target as HTMLElement;
-        if (target.tagName === 'INPUT') return;
+        e.preventDefault();
+        deleteSelected();
+        return;
         e.preventDefault();
         deleteSelected();
       }

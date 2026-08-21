@@ -60,7 +60,7 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
   const dragStartRef = useRef<{ colIdx: number; rowIdx: number } | null>(null);
 
   const allCols = colsWithRoad(cfg);
-  const editableCols = allCols.filter(c => !isRoadCol(c));
+  const editableCols = allCols;
   const rowNumbers = (() => {
     const list: (number | 'M')[] = [];
     for (let i = 1; i <= cfg.rows!; i++) list.push(i);
@@ -130,7 +130,9 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     });
     for (const key of keys) {
       const [col, rowStr] = key.split('|');
-      await clearCell({ warehouse: cfg.key, col, row: parseInt(rowStr, 10) });
+      if (!isRoadCol(col)) {
+  await clearCell({ warehouse: cfg.key, col, row: parseInt(rowStr, 10) });
+}
     }
     setSelected(new Set());
   }, [selected, cfg.key]);

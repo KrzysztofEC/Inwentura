@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { saveCell, clearCell } from '@/app/actions';
 import { parseProductCode, productName } from '@/lib/products';
 import type { Cell } from '@/types/db';
@@ -24,9 +24,7 @@ interface CellState {
 
 function emptyState(): CellState {
   return {
-    raw_label: '', starch: '',
-    weight_top: '', weight_bot: '',
-    note: '',
+    raw_label: '', starch: '', weight_top: '', weight_bot: '', note: '',
     product_code: null, product_code_bot: null,
     isUnknown: false, saving: false, dirty: false,
   };
@@ -38,8 +36,8 @@ function fromCell(c: Cell | undefined): CellState {
   return {
     raw_label: c.raw_label ?? '',
     starch: c.starch ?? '',
-    weight_top: c.weight_top !== null && c.weight_top !== undefined ? String(c.weight_top) : '',
-    weight_bot: c.weight_bot !== null && c.weight_bot !== undefined ? String(c.weight_bot) : '',
+    weight_top: c.weight_top != null ? String(c.weight_top) : '',
+    weight_bot: c.weight_bot != null ? String(c.weight_bot) : '',
     note: c.note ?? '',
     product_code: c.product_code ?? parsed.code,
     product_code_bot: c.product_code_bot ?? parsed.codeBot,
@@ -53,6 +51,9 @@ type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 function isRoadCol(col: string): boolean {
   return col === ROAD_COL_1 || col === ROAD_COL_2;
 }
+
+// Klucz zaznaczenia = "col|row" (cała komórka magazynowa)
+type SelectionKey = string;
 
 export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cell[] }) {
   const [states, setStates] = useState<Map<string, CellState>>(() => {
@@ -71,6 +72,111 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
   const retryRef = useRef<Set<string>>(new Set());
   const tableRef = useRef<HTMLTableElement>(null);
 
+  // ZAZNACZANIE
+  const [selected, setSelected] = useState<Set<SelectionKey>>(new Set());
+  const lastSelectedRef = useRef<SelectionKey | null>(null);
+  const allCols = colsWithRoad(cfg);
+  const rowNumbers = (() => {
+    const list: (number | 'M')[] = [];
+    for (let i = 1; i <= cfg.rows!; i++) list.push(i);
+    if (cfg.rowsReversed) list.reverse();
+    if (cfg.hasMagazynek) list.push('M');
+    return list;
+  })();
+
+  // Wszystkie możliwe klucze w kolejności (do Shift+klik)
+  const allKeys: SelectionKey[] = [];
+  for (const rNum of rowNumbers) {
+    if (rNum === 'M') continue;
+    for (const col of allCols) {
+      if (!isRoadCol(col)) allKeys.push(`${col}|${rNum}`);
+    }
+  }
+
+  function handleCellClick(col: string, row: number, e: React.MouseEvent) {
+    const key = `${col}|${row}`;
+    if (e.shiftKey && lastSelectedRef.current) {
+      // Zaznacz zakres
+      const fromIdx = allKeys.indexOf(lastSelectedRef.current);
+      const toIdx = allKeys.indexOf(key);
+      if (fromIdx !== -1 && toIdx !== -1) {
+        const [start, end] = fromIdx < toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx];
+        const range = new Set(allKeys.slice(start, end + 1));
+        setSelected(prev => {
+          const next = new Set(prev);
+          range.forEach(k => next.add(k));
+          return next;
+        });
+      }
+    } else if (e.ctrlKey || e.metaKey) {
+      // Dodaj/usuń z zaznaczenia
+      setSelected(prev => {
+        const next = new Set(prev);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        return next;
+      });
+      lastSelectedRef.current = key;
+    } else {
+      // Pojedyncze zaznaczenie
+      setSelected(new Set([key]));
+      lastSelectedRef.current = key;
+    }
+  }
+
+  function clearSelected() {
+    setSelected(new Set());
+    lastSelectedRef.current = null;
+  }
+
+  // Delete zaznaczonych komórek
+  const deleteSelected = useCallback(async () => {
+    if (selected.size === 0) return;
+    const keys = Array.from(selected);
+    // Wyczyść lokalnie
+    setStates(prev => {
+      const next = new Map(prev);
+      keys.forEach(key => next.set(key, { ...emptyState() }));
+      statesRef.current = next;
+      return next;
+    });
+    // Zapisz do bazy
+    for (const key of keys) {
+      const [col, rowStr] = key.split('|');
+      const row = parseInt(rowStr, 10);
+      await clearCell({ warehouse: cfg.key, col, row });
+    }
+    clearSelected();
+  }, [selected, cfg.key]);
+
+  // Nasłuch Delete/Backspace gdy nie jesteśmy w inpucie
+  useEffect(() => {
+    function handler(e: KeyboardEvent) {
+      if (selected.size === 0) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        deleteSelected();
+      }
+      if (e.key === 'Escape') {
+        clearSelected();
+      }
+    }
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [selected, deleteSelected]);
+
+  // Klik poza tabelą = odznacz
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (tableRef.current && !tableRef.current.contains(e.target as Node)) {
+        clearSelected();
+      }
+    }
+    window.addEventListener('mousedown', handler);
+    return () => window.removeEventListener('mousedown', handler);
+  }, []);
+
   function setStatus(key: string, status: SaveStatus) {
     setSaveStatus((prev) => { const m = new Map(prev); m.set(key, status); return m; });
   }
@@ -80,15 +186,9 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     if (inFlightRef.current.has(key)) { retryRef.current.add(key); return; }
     const st = statesRef.current.get(key);
     if (!st || !st.dirty) return;
-
     inFlightRef.current.add(key);
     setStatus(key, 'saving');
-
-    const snapshot = {
-      raw_label: st.raw_label, starch: st.starch,
-      weight_top: st.weight_top, weight_bot: st.weight_bot, note: st.note,
-    };
-
+    const snapshot = { raw_label: st.raw_label, starch: st.starch, weight_top: st.weight_top, weight_bot: st.weight_bot, note: st.note };
     try {
       if (!snapshot.raw_label && !snapshot.starch && !snapshot.weight_top && !snapshot.weight_bot && !snapshot.note) {
         await clearCell({ warehouse: cfg.key, col, row });
@@ -96,31 +196,23 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
         const result = await saveCell({ warehouse: cfg.key, col, row, ...snapshot });
         if (!result.ok) throw new Error(result.error || 'save failed');
       }
-
       const cur = statesRef.current.get(key);
       if (cur) {
-        const stillSame =
-          cur.raw_label === snapshot.raw_label && cur.starch === snapshot.starch &&
-          cur.weight_top === snapshot.weight_top && cur.weight_bot === snapshot.weight_bot &&
-          cur.note === snapshot.note;
+        const stillSame = cur.raw_label === snapshot.raw_label && cur.starch === snapshot.starch &&
+          cur.weight_top === snapshot.weight_top && cur.weight_bot === snapshot.weight_bot && cur.note === snapshot.note;
         if (stillSame) {
           const parsed = parseProductCode(cur.raw_label);
-          const cleaned: CellState = {
-            ...cur, saving: false, dirty: false,
-            product_code: parsed.code, product_code_bot: parsed.codeBot, isUnknown: parsed.isUnknown,
-          };
+          const cleaned: CellState = { ...cur, saving: false, dirty: false, product_code: parsed.code, product_code_bot: parsed.codeBot, isUnknown: parsed.isUnknown };
           const newMap = new Map(statesRef.current);
           newMap.set(key, cleaned);
           statesRef.current = newMap;
           setStates(newMap);
         }
       }
-
       setStatus(key, 'saved');
       setTimeout(() => { if (saveStatusRef.current.get(key) === 'saved') setStatus(key, 'idle'); }, 1500);
     } catch (e) {
       setStatus(key, 'error');
-      console.error('Save error for', key, e);
     } finally {
       inFlightRef.current.delete(key);
       if (retryRef.current.has(key)) { retryRef.current.delete(key); doSave(col, row); }
@@ -251,19 +343,11 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     }
   }
 
-  const rowNumbers = (() => {
-    const list: (number | 'M')[] = [];
-    for (let i = 1; i <= cfg.rows!; i++) list.push(i);
-    if (cfg.rowsReversed) list.reverse();
-    if (cfg.hasMagazynek) list.push('M');
-    return list;
-  })();
-
-  const allCols = colsWithRoad(cfg);
   const middleLabel = cfg.middleRow === 'info' ? 'INFO' : 'SKROBIA';
   const hasMiddle = !!cfg.middleRow;
 
-  function cellBgClass(st: CellState, col: string): string {
+  function cellBgClass(st: CellState, col: string, isSelected: boolean): string {
+    if (isSelected) return 'bg-blue-100';
     const road = isRoadCol(col);
     if (st.isUnknown) return 'bg-red-100';
     if (st.product_code || st.weight_top || st.weight_bot) return road ? 'bg-yellow-100' : 'bg-green-50';
@@ -274,11 +358,10 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     return isRoadCol(col) ? 45 : 70;
   }
 
-  function renderInput(col: string, row: number, field: Field, extraClass = '') {
+  function renderInput(col: string, row: number, field: Field) {
     const key = `${col}|${row}`;
     const st = states.get(key) ?? emptyState();
     const status = saveStatus.get(key) ?? 'idle';
-
     const baseClass = 'w-full px-1 py-1 border-0 outline-none bg-transparent focus:bg-yellow-100 focus:ring-2 focus:ring-blue-500 focus:ring-inset';
 
     if (field === 'kwit') {
@@ -291,14 +374,12 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
             onBlur={() => persist(col, row)}
             onKeyDown={(e) => handleKey(e, col, row, 'kwit')}
             title={st.product_code ? `${st.product_code}${st.product_code_bot ? ' / ' + st.product_code_bot : ''} (${productName(st.product_code)})` : ''}
-            className={`${baseClass} text-[12px] text-center font-semibold ${st.isUnknown ? 'text-red-700' : ''} ${extraClass}`}
+            className={`${baseClass} text-[12px] text-center font-semibold ${st.isUnknown ? 'text-red-700' : ''}`}
           />
           {status !== 'idle' && (
             <span className={`absolute top-0 right-0.5 text-[8px] leading-none ${
-              status === 'pending' ? 'text-gray-400' :
-              status === 'saving' ? 'text-blue-500 animate-pulse' :
-              status === 'saved' ? 'text-green-600' :
-              'text-red-600 font-bold'
+              status === 'pending' ? 'text-gray-400' : status === 'saving' ? 'text-blue-500 animate-pulse' :
+              status === 'saved' ? 'text-green-600' : 'text-red-600 font-bold'
             }`}>●</span>
           )}
         </div>
@@ -306,40 +387,32 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     }
     if (field === 'starch') {
       return (
-        <input
-          data-cell-input={`${cfg.key}|${col}|${row}|starch`}
+        <input data-cell-input={`${cfg.key}|${col}|${row}|starch`}
           value={st.starch}
           onChange={(e) => update(col, row, { starch: e.target.value })}
           onBlur={() => persist(col, row)}
           onKeyDown={(e) => handleKey(e, col, row, 'starch')}
-          className={`${baseClass} text-[11px] text-center text-gray-700 ${extraClass}`}
-        />
+          className={`${baseClass} text-[11px] text-center text-gray-700`} />
       );
     }
     if (field === 'weight_top') {
       return (
-        <input
-          data-cell-input={`${cfg.key}|${col}|${row}|weight_top`}
-          value={st.weight_top}
-          type="text" inputMode="decimal"
+        <input data-cell-input={`${cfg.key}|${col}|${row}|weight_top`}
+          value={st.weight_top} type="text" inputMode="decimal"
           onChange={(e) => update(col, row, { weight_top: e.target.value })}
           onBlur={() => persist(col, row)}
           onKeyDown={(e) => handleKey(e, col, row, 'weight_top')}
-          className={`${baseClass} text-[12px] text-right text-green-800 font-semibold ${extraClass}`}
-        />
+          className={`${baseClass} text-[12px] text-right text-green-800 font-semibold`} />
       );
     }
     if (field === 'weight_bot') {
       return (
-        <input
-          data-cell-input={`${cfg.key}|${col}|${row}|weight_bot`}
-          value={st.weight_bot}
-          type="text" inputMode="decimal"
+        <input data-cell-input={`${cfg.key}|${col}|${row}|weight_bot`}
+          value={st.weight_bot} type="text" inputMode="decimal"
           onChange={(e) => update(col, row, { weight_bot: e.target.value })}
           onBlur={() => persist(col, row)}
           onKeyDown={(e) => handleKey(e, col, row, 'weight_bot')}
-          className={`${baseClass} text-[12px] text-right text-green-800 font-semibold ${extraClass}`}
-        />
+          className={`${baseClass} text-[12px] text-right text-green-800 font-semibold`} />
       );
     }
     return null;
@@ -347,7 +420,7 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
 
   return (
     <div className="bg-white rounded shadow-sm overflow-x-auto">
-      <SaveBar states={states} saveStatus={saveStatus} flushAll={flushAll} />
+      <SaveBar states={states} saveStatus={saveStatus} flushAll={flushAll} selected={selected} onDeleteSelected={deleteSelected} onClearSelected={clearSelected} />
       <table ref={tableRef} className="border-collapse w-full" style={{ tableLayout: 'fixed' }}>
         <colgroup>
           <col style={{ width: 36 }} />
@@ -376,12 +449,8 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
             <th className="bg-gray-900 text-white text-[10px]"></th>
             <th className="bg-gray-700 text-gray-200 text-[10px] font-normal"></th>
             {allCols.flatMap((col, idx) => [
-              <th key={`${idx}-g`} className={`font-normal text-[10px] border ${
-                isRoadCol(col) ? 'bg-gray-400 text-gray-100 border-gray-600' : 'bg-gray-700 text-gray-200 border-gray-600'
-              }`}>góra</th>,
-              <th key={`${idx}-d`} className={`font-normal text-[10px] border ${
-                isRoadCol(col) ? 'bg-gray-400 text-gray-100 border-gray-600' : 'bg-gray-700 text-gray-200 border-gray-600'
-              }`}>dół</th>,
+              <th key={`${idx}-g`} className={`font-normal text-[10px] border ${isRoadCol(col) ? 'bg-gray-400 text-gray-100 border-gray-600' : 'bg-gray-700 text-gray-200 border-gray-600'}`}>góra</th>,
+              <th key={`${idx}-d`} className={`font-normal text-[10px] border ${isRoadCol(col) ? 'bg-gray-400 text-gray-100 border-gray-600' : 'bg-gray-700 text-gray-200 border-gray-600'}`}>dół</th>,
             ])}
             <th className="bg-gray-700 text-gray-200 text-[10px] font-normal"></th>
           </tr>
@@ -413,8 +482,12 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
                   {allCols.map((col, idx) => {
                     const road = isRoadCol(col);
                     const st = states.get(`${col}|${r}`) ?? emptyState();
+                    const isSel = selected.has(`${col}|${r}`);
                     return (
-                      <td key={idx} colSpan={2} className={`border ${road ? 'border-gray-500' : 'border-gray-300'} p-0 align-middle ${cellBgClass(st, col)} relative`}>
+                      <td key={idx} colSpan={2}
+                        className={`border ${road ? 'border-gray-500' : 'border-gray-300'} p-0 align-middle ${cellBgClass(st, col, isSel)} relative cursor-pointer`}
+                        onClick={(e) => { if (!road) handleCellClick(col, r, e); }}>
+                        {isSel && <div className="absolute inset-0 border-2 border-blue-500 pointer-events-none z-10" />}
                         {renderInput(col, r, 'kwit')}
                       </td>
                     );
@@ -428,8 +501,11 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
                     {allCols.map((col, idx) => {
                       const road = isRoadCol(col);
                       const st = states.get(`${col}|${r}`) ?? emptyState();
+                      const isSel = selected.has(`${col}|${r}`);
                       return (
-                        <td key={idx} colSpan={2} className={`border ${road ? 'border-gray-500' : 'border-gray-300'} p-0 align-middle ${cellBgClass(st, col)}`}>
+                        <td key={idx} colSpan={2}
+                          className={`border ${road ? 'border-gray-500' : 'border-gray-300'} p-0 align-middle ${cellBgClass(st, col, isSel)}`}
+                          onClick={(e) => { if (!road) handleCellClick(col, r, e); }}>
                           {renderInput(col, r, 'starch')}
                         </td>
                       );
@@ -442,13 +518,16 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
                   {allCols.flatMap((col, idx) => {
                     const road = isRoadCol(col);
                     const st = states.get(`${col}|${r}`) ?? emptyState();
-                    const bg = cellBgClass(st, col);
+                    const isSel = selected.has(`${col}|${r}`);
+                    const bg = cellBgClass(st, col, isSel);
                     const border = road ? 'border-gray-500' : 'border-gray-300';
                     return [
-                      <td key={`${idx}-wt`} className={`border ${border} p-0 align-middle ${bg}`}>
+                      <td key={`${idx}-wt`} className={`border ${border} p-0 align-middle ${bg}`}
+                        onClick={(e) => { if (!road) handleCellClick(col, r, e); }}>
                         {renderInput(col, r, 'weight_top')}
                       </td>,
-                      <td key={`${idx}-wb`} className={`border ${border} p-0 align-middle ${bg}`}>
+                      <td key={`${idx}-wb`} className={`border ${border} p-0 align-middle ${bg}`}
+                        onClick={(e) => { if (!road) handleCellClick(col, r, e); }}>
                         {renderInput(col, r, 'weight_bot')}
                       </td>,
                     ];
@@ -461,23 +540,46 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
       </table>
 
       <div className="text-xs text-gray-500 px-2 py-1.5 border-t bg-gray-50">
-        <strong>Skróty:</strong> ↓↑ jeden rząd w pionie · →← w bok między polami · Enter = pole niżej · Tab = następne pole · zapis automatyczny.
-        W KWIT wpisz <code className="bg-gray-200 px-1 rounded">K</code> = ten sam produkt na górze i dole; <code className="bg-gray-200 px-1 rounded">S / PZ</code> = S na górze, PZ na dole; <code className="bg-gray-200 px-1 rounded">K / 1580</code> = K z numerem kwitu 1580.
+        <strong>Skróty:</strong> ↓↑ jeden rząd w pionie · →← w bok między polami · Enter = pole niżej · Tab = następne pole · zapis automatyczny ·
+        <strong> Klik</strong> = zaznacz komórkę · <strong>Shift+Klik</strong> = zakres · <strong>Ctrl+Klik</strong> = dodaj do zaznaczenia · <strong>Delete</strong> = usuń zaznaczone
+        W KWIT wpisz <code className="bg-gray-200 px-1 rounded">K</code> = ten sam produkt na górze i dole; <code className="bg-gray-200 px-1 rounded">S / PZ</code> = S na górze, PZ na dole.
       </div>
     </div>
   );
 }
 
-function SaveBar({ states, saveStatus, flushAll }: {
+function SaveBar({ states, saveStatus, flushAll, selected, onDeleteSelected, onClearSelected }: {
   states: Map<string, CellState>;
   saveStatus: Map<string, SaveStatus>;
   flushAll: () => void;
+  selected: Set<string>;
+  onDeleteSelected: () => void;
+  onClearSelected: () => void;
 }) {
   let dirty = 0; let saving = 0; let errors = 0;
   for (const st of states.values()) if (st.dirty) dirty++;
   for (const s of saveStatus.values()) {
     if (s === 'saving') saving++;
     else if (s === 'error') errors++;
+  }
+
+  if (selected.size > 0) {
+    return (
+      <div className="px-2 py-1 text-xs bg-blue-50 border-b border-blue-300 text-blue-900 flex items-center gap-3">
+        <span className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+          Zaznaczono: <strong>{selected.size}</strong> {selected.size === 1 ? 'komórkę' : 'komórek'}
+        </span>
+        <button onClick={onDeleteSelected}
+          className="bg-red-600 hover:bg-red-700 text-white px-2 py-0.5 rounded text-[11px] font-semibold">
+          🗑 Usuń zaznaczone (Delete)
+        </button>
+        <button onClick={onClearSelected}
+          className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-0.5 rounded text-[11px]">
+          Odznacz (Esc)
+        </button>
+      </div>
+    );
   }
 
   if (dirty === 0 && saving === 0 && errors === 0) {

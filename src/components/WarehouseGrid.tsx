@@ -205,7 +205,6 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
         });
       }
     }
-    clipboardRef.current = null;
     setPasteTarget(null);
     setSelected(new Set());
   }, [allCols, numericRows, cfg.key]);
@@ -213,10 +212,9 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
   useEffect(() => {
     function handler(e: KeyboardEvent) {
       if (e.key === 'Delete' || e.key === 'Backspace') {
-  if (selected.size === 0) return;
-  e.preventDefault();
-  deleteSelected();
-}
+        if (selected.size === 0) return;
+        e.preventDefault();
+        deleteSelected();
       }
       if (e.key === 'Escape') { setSelected(new Set()); setPasteTarget(null); }
       // Ctrl+C — kopiuj

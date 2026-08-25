@@ -38,6 +38,8 @@ type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 
 function isRoadCol(col: string): boolean { return col === ROAD_COL_1 || col === ROAD_COL_2; }
 
+interface ClipboardCell { colOffset: number; rowOffset: number; state: CellState; }
+
 export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cell[] }) {
   const [states, setStates] = useState<Map<string, CellState>>(() => {
     const m = new Map<string, CellState>();
@@ -53,17 +55,16 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
   const retryRef = useRef<Set<string>>(new Set());
   const tableRef = useRef<HTMLTableElement>(null);
 
-  // ZAZNACZANIE — aktywne tylko gdy Ctrl wciśnięty
+  // ZAZNACZANIE
   const [ctrlHeld, setCtrlHeld] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const isDragging = useRef(false);
   const dragStartRef = useRef<{ colIdx: number; rowIdx: number } | null>(null);
 
-  // SCHOWEK — kopiowanie/wklejanie
-  interface ClipboardCell { colOffset: number; rowOffset: number; state: CellState; }
+  // SCHOWEK
   const clipboardRef = useRef<ClipboardCell[] | null>(null);
+  const [hasClipboard, setHasClipboard] = useState(false);
   const [hasCopied, setHasCopied] = useState(false);
-  const [pasteTarget, setPasteTarget] = useState<string | null>(null); // klucz pierwszej komórki docelowej
 
   const allCols = colsWithRoad(cfg);
   const editableCols = allCols.filter(c => !isRoadCol(c));
@@ -136,16 +137,17 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     });
     for (const key of keys) {
       const [col, rowStr] = key.split('|');
-      await clearCell({ warehouse: cfg.key, col, row: parseInt(rowStr, 10) });
+      if (!isRoadCol(col)) {
+        await clearCell({ warehouse: cfg.key, col, row: parseInt(rowStr, 10) });
+      }
     }
     setSelected(new Set());
   }, [selected, cfg.key]);
 
-  // Kopiuj zaznaczone komórki
+  // Kopiuj zaznaczone
   const copySelected = useCallback(() => {
     if (selected.size === 0) return;
     const keys = Array.from(selected);
-    // Znajdź min col/row jako punkt odniesienia
     const positions = keys.map(k => {
       const [col, rowStr] = k.split('|');
       return { col, row: parseInt(rowStr), colIdx: allCols.indexOf(col), rowIdx: numericRows.indexOf(parseInt(rowStr)) };
@@ -158,18 +160,33 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
       state: { ...(statesRef.current.get(`${p.col}|${p.row}`) ?? emptyState()) },
     }));
     clipboardRef.current = clipboard;
+    setHasClipboard(true);
     setHasCopied(true);
     setTimeout(() => setHasCopied(false), 2000);
   }, [selected, allCols, numericRows]);
 
-  // Wklej ze schowka — pasteTarget to klucz komórki docelowej (lewy górny róg)
-  const pasteClipboard = useCallback(async (targetKey: string) => {
+  // Wyczyść schowek
+  function clearClipboard() {
+    clipboardRef.current = null;
+    setHasClipboard(false);
+  }
+
+  // Wklej — cel to lewa górna zaznaczona komórka
+  const pasteClipboard = useCallback(async () => {
     const clipboard = clipboardRef.current;
-    if (!clipboard || clipboard.length === 0) return;
-    const [targetCol, targetRowStr] = targetKey.split('|');
+    if (!clipboard || clipboard.length === 0 || selected.size === 0) return;
+
+    // Znajdź lewą górną zaznaczoną komórkę jako cel
+    const positions = Array.from(selected).map(k => {
+      const [col, rowStr] = k.split('|');
+      return { key: k, colIdx: allCols.indexOf(col), rowIdx: numericRows.indexOf(parseInt(rowStr)) };
+    });
+    const topLeft = positions.reduce((min, p) =>
+      p.rowIdx < min.rowIdx || (p.rowIdx === min.rowIdx && p.colIdx < min.colIdx) ? p : min
+    );
+    const [targetCol, targetRowStr] = topLeft.key.split('|');
     const targetColIdx = allCols.indexOf(targetCol);
     const targetRowIdx = numericRows.indexOf(parseInt(targetRowStr));
-    if (targetColIdx === -1 || targetRowIdx === -1) return;
 
     const toSave: { col: string; row: number; state: CellState }[] = [];
     for (const cell of clipboard) {
@@ -182,33 +199,27 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
       toSave.push({ col: destCol, row: destRow, state: cell.state });
     }
 
-    // Aktualizuj lokalnie
     setStates(prev => {
       const next = new Map(prev);
-      toSave.forEach(({ col, row, state }) => {
-        next.set(`${col}|${row}`, { ...state, dirty: true });
-      });
+      toSave.forEach(({ col, row, state }) => next.set(`${col}|${row}`, { ...state, dirty: true }));
       statesRef.current = next;
       return next;
     });
 
-    // Zapisz do bazy
     for (const { col, row, state } of toSave) {
       if (!isRoadCol(col)) {
         await saveCell({
           warehouse: cfg.key, col, row,
-          raw_label: state.raw_label,
-          starch: state.starch,
-          weight_top: state.weight_top,
-          weight_bot: state.weight_bot,
-          note: state.note,
+          raw_label: state.raw_label, starch: state.starch,
+          weight_top: state.weight_top, weight_bot: state.weight_bot, note: state.note,
         });
       }
     }
-    setPasteTarget(null);
+    // Schowek zostaje — można wklejać wielokrotnie
     setSelected(new Set());
-  }, [allCols, numericRows, cfg.key]);
+  }, [selected, allCols, numericRows, cfg.key]);
 
+  // Klawiatura
   useEffect(() => {
     function handler(e: KeyboardEvent) {
       if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -216,19 +227,19 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
         e.preventDefault();
         deleteSelected();
       }
-      if (e.key === 'Escape') { setSelected(new Set()); setPasteTarget(null); }
-      // Ctrl+C — kopiuj
+      if (e.key === 'Escape') {
+        setSelected(new Set());
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
         if (selected.size > 0) { e.preventDefault(); copySelected(); }
       }
-      // Ctrl+V — wklej (gdy jest wybrany cel)
       if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
-        if (pasteTarget && clipboardRef.current) { e.preventDefault(); pasteClipboard(pasteTarget); }
+        if (clipboardRef.current && selected.size > 0) { e.preventDefault(); pasteClipboard(); }
       }
     }
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [selected, deleteSelected, copySelected, pasteClipboard, pasteTarget]);
+  }, [selected, deleteSelected, copySelected, pasteClipboard]);
 
   function setStatus(key: string, status: SaveStatus) {
     setSaveStatus((prev) => { const m = new Map(prev); m.set(key, status); return m; });
@@ -362,49 +373,37 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     const road = isRoadCol(col);
     const key = `${col}|${row}`;
     const st = states.get(key) ?? emptyState();
-    const isSel = !road && selected.has(key);
-    const isPasteTarget = pasteTarget === key;
+    const isSel = selected.has(key);
     const bg = cellBg(st, col, isSel);
     const border = road ? 'border-gray-500' : 'border-gray-300';
-
-    // Gdy mamy schowek i Ctrl wciśnięty — klik ustawia cel wklejania
-    const handlePasteTargetClick = (e: React.MouseEvent) => {
-      if (clipboardRef.current && ctrlHeld && !isDragging.current) {
-        e.preventDefault();
-        setPasteTarget(key);
-      }
-    };
-
     return (
       <td key={tdKey} colSpan={colSpan} className={`border ${border} p-0 align-middle ${bg} relative`}>
         {renderInput(col, row, field)}
-        {/* Nakładka TYLKO gdy Ctrl wciśnięty */}
         {ctrlHeld && (
           <div
             className="absolute inset-0 z-20"
-            style={{ cursor: clipboardRef.current ? 'copy' : 'crosshair', background: isSel ? 'rgba(59,130,246,0.15)' : isPasteTarget ? 'rgba(34,197,94,0.15)' : 'transparent' }}
-            onMouseDown={(e) => {
-              if (clipboardRef.current) { handlePasteTargetClick(e); }
-              else { handleOverlayMouseDown(col, row, e); }
-            }}
-            onMouseEnter={() => { if (!clipboardRef.current) handleOverlayMouseEnter(col, row); }}
+            style={{ cursor: 'crosshair', background: isSel ? 'rgba(59,130,246,0.15)' : 'transparent' }}
+            onMouseDown={(e) => handleOverlayMouseDown(col, row, e)}
+            onMouseEnter={() => handleOverlayMouseEnter(col, row)}
           />
         )}
         {isSel && <div className="absolute inset-0 border-2 border-blue-500 pointer-events-none z-30" />}
-        {isPasteTarget && <div className="absolute inset-0 border-2 border-green-500 pointer-events-none z-30" />}
       </td>
     );
   }
 
   return (
     <div className="bg-white rounded shadow-sm overflow-x-auto">
-      <SaveBar states={states} saveStatus={saveStatus} flushAll={flushAll}
-        selected={selected} ctrlHeld={ctrlHeld} hasCopied={hasCopied} pasteTarget={pasteTarget}
-        hasClipboard={!!clipboardRef.current}
+      <SaveBar
+        states={states} saveStatus={saveStatus} flushAll={flushAll}
+        selected={selected} ctrlHeld={ctrlHeld}
+        hasClipboard={hasClipboard} hasCopied={hasCopied}
         onDeleteSelected={deleteSelected}
-        onClearSelected={() => { setSelected(new Set()); setPasteTarget(null); clipboardRef.current = null; }}
         onCopy={copySelected}
-        onPaste={pasteTarget ? () => pasteClipboard(pasteTarget) : undefined} />
+        onPaste={selected.size > 0 && hasClipboard ? pasteClipboard : undefined}
+        onClearClipboard={clearClipboard}
+        onClearSelected={() => setSelected(new Set())}
+      />
       <table ref={tableRef} className="border-collapse w-full" style={{ tableLayout: 'fixed' }}>
         <colgroup>
           <col style={{ width: 36 }} /><col style={{ width: 70 }} />
@@ -466,50 +465,53 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
       </table>
       <div className="text-xs text-gray-500 px-2 py-1.5 border-t bg-gray-50">
         <strong>Skróty:</strong> ↓↑ jeden rząd · →← w bok · Enter = pole niżej · Tab = następne pole · zapis automatyczny ·
-        <strong> Przytrzymaj Ctrl</strong> i przeciągnij = zaznacz · <strong>Ctrl+C</strong> = kopiuj · kliknij cel + <strong>Ctrl+V</strong> = wklej · <strong>Delete</strong> = usuń · <strong>Esc</strong> = odznacz.
+        <strong> Ctrl+przeciągnij</strong> = zaznacz · <strong>Ctrl+C</strong> = kopiuj · zaznacz cel + <strong>Ctrl+V</strong> = wklej · <strong>Delete</strong> = usuń · <strong>Esc</strong> = odznacz.
       </div>
     </div>
   );
 }
 
-function SaveBar({ states, saveStatus, flushAll, selected, ctrlHeld, hasCopied, pasteTarget, hasClipboard, onDeleteSelected, onClearSelected, onCopy, onPaste }: {
+function SaveBar({ states, saveStatus, flushAll, selected, ctrlHeld, hasClipboard, hasCopied, onDeleteSelected, onCopy, onPaste, onClearClipboard, onClearSelected }: {
   states: Map<string, CellState>; saveStatus: Map<string, SaveStatus>; flushAll: () => void;
-  selected: Set<string>; ctrlHeld: boolean; hasCopied: boolean; pasteTarget: string | null;
-  hasClipboard: boolean; onDeleteSelected: () => void; onClearSelected: () => void;
-  onCopy: () => void; onPaste?: () => void;
+  selected: Set<string>; ctrlHeld: boolean; hasClipboard: boolean; hasCopied: boolean;
+  onDeleteSelected: () => void; onCopy: () => void; onPaste?: () => void;
+  onClearClipboard: () => void; onClearSelected: () => void;
 }) {
   let dirty = 0; let saving = 0; let errors = 0;
   for (const st of states.values()) if (st.dirty) dirty++;
   for (const s of saveStatus.values()) { if (s === 'saving') saving++; else if (s === 'error') errors++; }
 
-  if (pasteTarget && hasClipboard) return (
-    <div className="px-2 py-1 text-xs bg-green-50 border-b border-green-300 text-green-900 flex items-center gap-3">
-      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500"></span>Cel wklejania wybrany</span>
-      <button onClick={onPaste} className="bg-green-600 hover:bg-green-700 text-white px-2 py-0.5 rounded text-[11px] font-semibold">📋 Wklej tutaj (Ctrl+V)</button>
-      <button onClick={onClearSelected} className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-0.5 rounded text-[11px]">Anuluj (Esc)</button>
+  if (selected.size > 0) return (
+    <div className="px-2 py-1 text-xs bg-blue-50 border-b border-blue-300 text-blue-900 flex items-center gap-2 flex-wrap">
+      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500"></span>Zaznaczono: <strong>{selected.size}</strong> {selected.size === 1 ? 'komórkę' : 'komórek'}</span>
+      <button onClick={onCopy} className="bg-green-600 hover:bg-green-700 text-white px-2 py-0.5 rounded text-[11px] font-semibold">📋 Kopiuj (Ctrl+C)</button>
+      {onPaste && <button onClick={onPaste} className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-0.5 rounded text-[11px] font-semibold">📌 Wklej tutaj (Ctrl+V)</button>}
+      <button onClick={onDeleteSelected} className="bg-red-600 hover:bg-red-700 text-white px-2 py-0.5 rounded text-[11px] font-semibold">🗑 Usuń (Delete)</button>
+      <button onClick={onClearSelected} className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-0.5 rounded text-[11px]">Odznacz (Esc)</button>
+      {hasClipboard && <button onClick={onClearClipboard} className="bg-gray-200 hover:bg-gray-300 text-gray-500 px-2 py-0.5 rounded text-[11px]">✕ Wyczyść schowek</button>}
     </div>
   );
 
   if (hasCopied) return (
     <div className="px-2 py-1 text-xs bg-green-50 border-b border-green-200 text-green-800 flex items-center gap-2">
       <span className="w-2 h-2 rounded-full bg-green-500"></span>
-      Skopiowano! Przytrzymaj Ctrl i kliknij komórkę docelową, potem Ctrl+V
+      Skopiowano! Zaznacz komórki docelowe i naciśnij Ctrl+V aby wkleić.
+      <button onClick={onClearClipboard} className="ml-auto bg-gray-200 hover:bg-gray-300 text-gray-600 px-2 py-0.5 rounded text-[11px]">✕ Wyczyść schowek</button>
     </div>
   );
 
-  if (selected.size > 0) return (
-    <div className="px-2 py-1 text-xs bg-blue-50 border-b border-blue-300 text-blue-900 flex items-center gap-3">
-      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500"></span>Zaznaczono: <strong>{selected.size}</strong> {selected.size === 1 ? 'komórkę' : 'komórek'}</span>
-      <button onClick={onCopy} className="bg-green-600 hover:bg-green-700 text-white px-2 py-0.5 rounded text-[11px] font-semibold">📋 Kopiuj (Ctrl+C)</button>
-      <button onClick={onDeleteSelected} className="bg-red-600 hover:bg-red-700 text-white px-2 py-0.5 rounded text-[11px] font-semibold">🗑 Usuń (Delete)</button>
-      <button onClick={onClearSelected} className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-0.5 rounded text-[11px]">Odznacz (Esc)</button>
+  if (hasClipboard) return (
+    <div className="px-2 py-1 text-xs bg-indigo-50 border-b border-indigo-200 text-indigo-800 flex items-center gap-2">
+      <span className="w-2 h-2 rounded-full bg-indigo-400"></span>
+      Schowek gotowy — zaznacz cel (Ctrl+przeciągnij) i naciśnij Ctrl+V
+      <button onClick={onClearClipboard} className="ml-auto bg-gray-200 hover:bg-gray-300 text-gray-600 px-2 py-0.5 rounded text-[11px]">✕ Wyczyść schowek</button>
     </div>
   );
 
   if (ctrlHeld) return (
     <div className="px-2 py-1 text-xs bg-indigo-50 border-b border-indigo-200 text-indigo-800 flex items-center gap-2">
       <span className="w-2 h-2 rounded-full bg-indigo-400"></span>
-      {hasClipboard ? 'Schowek gotowy — kliknij komórkę docelową (lewy górny róg) potem Ctrl+V' : 'Tryb zaznaczania — przeciągnij myszką po komórkach które chcesz zaznaczyć'}
+      Tryb zaznaczania — przeciągnij myszką po komórkach
     </div>
   );
 

@@ -135,11 +135,9 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
       statesRef.current = next;
       return next;
     });
-    for (const key of keys) {
+        for (const key of keys) {
       const [col, rowStr] = key.split('|');
-      if (!isRoadCol(col)) {
-        await clearCell({ warehouse: cfg.key, col, row: parseInt(rowStr, 10) });
-      }
+      await clearCell({ warehouse: cfg.key, col, row: parseInt(rowStr, 10) });
     }
     setSelected(new Set());
   }, [selected, cfg.key]);

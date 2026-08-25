@@ -67,7 +67,7 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
   const [hasCopied, setHasCopied] = useState(false);
 
   const allCols = colsWithRoad(cfg);
-  const editableCols = allCols.filter(c => !isRoadCol(c));
+  const editableCols = allCols;
   const rowNumbers = (() => {
     const list: (number | 'M')[] = [];
     for (let i = 1; i <= cfg.rows!; i++) list.push(i);

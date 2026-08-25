@@ -146,9 +146,9 @@ function KontenerySection({ containers }: { containers: Container[][] }) {
       <div className="kontenery-grid">
         {containers.map((lines, i) => {
           const cnum = i + 1;
-          const rowsToShow = lines.length > 4
-            ? [...lines, ...Array(Math.max(0, 4 - lines.length)).fill(null)]
-            : Array(3).fill(null);
+          const rowsToShow = lines.length >= 4
+  ? [...lines, null]
+  : [...lines, ...Array(Math.max(0, 4 - lines.length)).fill(null)];
           return (
             <div key={cnum} className="kontener-box">
               <div className="kontener-title">Kontener {cnum}</div>

@@ -19,6 +19,7 @@ export const WAREHOUSES: Record<string, WarehouseConfig> = {
   blaszak2:   { key: 'blaszak2',   name: 'Blaszak 2',            type: 'blaszak',   cols: ['A','B','C','D','E','F','G','H','I','J'], rows: 8, roadAfter: 5, hasMagazynek: true, rowsReversed: true, middleRow: 'info' },
   wiata:      { key: 'wiata',      name: 'Wiata',                type: 'grid',      cols: ['A','B','C','D','E','F','G'], rows: 13, middleRow: 'info' },
   kontenery:  { key: 'kontenery',  name: 'Kontenery',            type: 'kontenery', containers: 6 },
+  nowa_hala: { key: 'nowa_hala', name: 'Nowa Hala', type: 'grid', cols: ['A','B','C','D','E','F','G','H'], rows: 12, middleRow: 'starch' },
   ambro:      { key: 'ambro',      name: 'Ambro (zewnętrzny)',   type: 'ambro' },
 };
 export const WAREHOUSE_KEYS = Object.keys(WAREHOUSES);

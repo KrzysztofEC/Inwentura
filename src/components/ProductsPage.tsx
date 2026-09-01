@@ -1,9 +1,7 @@
 'use client';
 
-import { useState, useEffect, useTransition } from 'react';
+import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Topbar } from '@/components/Topbar';
-import { Plus, Trash2, Save, RefreshCw } from 'lucide-react';
 
 interface Product {
   id?: number;
@@ -16,7 +14,6 @@ export default function ProductsPage() {
   const supabase = createClient();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  const [pending, startTransition] = useTransition();
   const [search, setSearch] = useState('');
   const [newCode, setNewCode] = useState('');
   const [newName, setNewName] = useState('');
@@ -46,12 +43,9 @@ export default function ProductsPage() {
     }
     const code = newCode.trim().toUpperCase();
     const aliases = newAliases.split(',').map(a => a.trim()).filter(Boolean);
-    // Zawsze dodaj sam kod jako alias
     if (!aliases.includes(code)) aliases.unshift(code);
 
-    const { error: err } = await supabase.from('products').insert({
-      code, name: newName.trim(), aliases,
-    });
+    const { error: err } = await supabase.from('products').insert({ code, name: newName.trim(), aliases });
     if (err) {
       setError(err.message.includes('unique') ? `Kod "${code}" już istnieje` : err.message);
       return;
@@ -62,8 +56,8 @@ export default function ProductsPage() {
   }
 
   async function updateProduct(id: number, patch: Partial<Product>) {
-    const { error: err } = await supabase.from('products').update(patch).eq('id', id);
-    if (!err) showSuccess('Zapisano');
+    await supabase.from('products').update(patch).eq('id', id);
+    showSuccess('Zapisano');
     load();
   }
 
@@ -88,8 +82,8 @@ export default function ProductsPage() {
           <h1 className="text-2xl font-semibold">Produkty</h1>
           <p className="text-sm text-gray-500">Zarządzaj listą produktów i ich aliasami</p>
         </div>
-        <button onClick={load} className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-gray-100 hover:bg-gray-200 text-sm">
-          <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Odśwież
+        <button onClick={load} className="px-3 py-1.5 rounded bg-gray-100 hover:bg-gray-200 text-sm">
+          ↻ Odśwież
         </button>
       </div>
 
@@ -114,8 +108,8 @@ export default function ProductsPage() {
               onKeyDown={e => e.key === 'Enter' && addProduct()} />
           </div>
           <button onClick={addProduct}
-            className="flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium">
-            <Plus size={14} /> Dodaj
+            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium">
+            + Dodaj
           </button>
         </div>
         {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
@@ -137,7 +131,7 @@ export default function ProductsPage() {
               <th className="text-left p-2 w-24">Kod</th>
               <th className="text-left p-2 w-48">Nazwa</th>
               <th className="text-left p-2">Aliasy</th>
-              <th className="w-16"></th>
+              <th className="w-20 text-center p-2">Akcje</th>
             </tr>
           </thead>
           <tbody>
@@ -155,7 +149,7 @@ export default function ProductsPage() {
       </div>
 
       <p className="text-xs text-gray-400 mt-3">
-        💡 Aliasy to alternatywne nazwy które możesz wpisać w polu KWIT — system automatycznie rozpozna produkt.
+        💡 Aliasy to alternatywne nazwy które możesz wpisać w polu KWIT — system rozpozna produkt po aliasie.
         Kod zawsze jest aliasem samego siebie.
       </p>
     </div>
@@ -197,17 +191,19 @@ function ProductRow({ product, odd, onUpdate, onDelete }: {
           className={`${inputClass} text-gray-500 text-xs`}
           placeholder="alias1, alias2, alias3" />
       </td>
-      <td className="p-1 flex items-center gap-1 justify-end">
-        {dirty && (
-          <button onClick={save}
-            className="p-1 rounded text-green-600 hover:bg-green-50 transition-colors" title="Zapisz">
-            <Save size={13} />
+      <td className="p-1 text-center">
+        <div className="flex items-center gap-1 justify-center">
+          {dirty && (
+            <button onClick={save}
+              className="px-2 py-0.5 rounded text-xs bg-green-100 hover:bg-green-200 text-green-700 font-medium">
+              Zapisz
+            </button>
+          )}
+          <button onClick={onDelete}
+            className="px-2 py-0.5 rounded text-xs bg-red-100 hover:bg-red-200 text-red-600">
+            Usuń
           </button>
-        )}
-        <button onClick={onDelete}
-          className="p-1 rounded text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors" title="Usuń">
-          <Trash2 size={13} />
-        </button>
+        </div>
       </td>
     </tr>
   );

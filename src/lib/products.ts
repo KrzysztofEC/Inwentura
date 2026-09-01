@@ -1,168 +1,163 @@
-// Słownik kanonicznych produktów i ich nazw wyświetlanych.
-export const PRODUCTS: Record<string, string> = {
-  K: 'Kostka',
-  KD: 'Kostka duża',
-  KM: 'Kostka mała',
-  KC: 'Kostka C',
-  KB: 'Kostka B',
-  KO: 'Kostka odsort',
-  OK: 'Odzysk Kostka',
-  OS: 'Odzysk Sticksy',
-  ST: 'Sticksy',
-  SO: 'Semolina odsort',
-  S: 'Semolina',
-  SR: 'Semolina SR',
-  SZ: 'Semolina Z',
-  SPG: 'Semolina SPG',
-  SB: 'Semolina B',
-  P: 'Proszek',
-  PZ: 'Proszek Z',
-  PZG: 'Proszek ZG',
-  PZD: 'Proszek ZD',
-  G: 'Grys',
-  GR: 'Granulat',
-  SCORPION: 'Scorpion (wentylacja)',
-  GRYSIK: 'Grysik',
-  SK: 'Skórki',
-  ZMIOTKI: 'Zmiotki',
-  KBB: 'Kostka BB',
-  SBB: 'Semolina BB',
-  SRBB: 'Semolina SR BB',
-  GBB: 'Grys BB',
-  GRBB: 'Granulat BB',
-  STBB: 'Sticksy BB',
-  PBB: 'Proszek BB',
-  GRYSIKBB: 'Grysik BB',
-  KBIO: 'Kostka BIO',
-  KDBIO: 'Kostka duża BIO',
-  KCBIO: 'Kostka C BIO',
-  KBBIO: 'Kostka B BIO',
-  KOBIO: 'Kostka odsort BIO',
-  OKBIO: 'Odzysk Kostka BIO',
-  OSBIO: 'Odzysk Sticksy BIO',
-  STBIO: 'Sticksy BIO',
-  SBIO: 'Semolina BIO',
-  SRBIO: 'Semolina SR BIO',
-  SZBIO: 'Semolina Z BIO',
-  SPGBIO: 'Semolina SPG BIO',
-  SBBIO: 'Semolina B BIO',
-  PBIO: 'Proszek BIO',
-  PZBIO: 'Proszek Z BIO',
-  GBIO: 'Grys BIO',
-  GRBIO: 'Granulat BIO',
-  GRYSIKBIO: 'Grysik BIO',
+// products.ts — aliasy ładowane z bazy danych przez API
+// Statyczna lista służy tylko jako fallback gdy API niedostępne
+
+export interface ProductDef {
+  code: string;
+  name: string;
+  aliases: string[];
+}
+
+// ============================================================
+// NORMALIZACJA
+// ============================================================
+function normalizeStr(s: string): string {
+  return s.trim().toUpperCase()
+    .replace(/Ą/g,'A').replace(/Ć/g,'C').replace(/Ę/g,'E')
+    .replace(/Ł/g,'L').replace(/Ń/g,'N').replace(/Ó/g,'O')
+    .replace(/Ś/g,'S').replace(/Ź/g,'Z').replace(/Ż/g,'Z');
+}
+
+// ============================================================
+// DYNAMICZNY ALIAS MAP — ładowany z bazy
+// ============================================================
+let dynamicAliasMap: Map<string, string> | null = null;
+let dynamicNameMap: Map<string, string> | null = null;
+let loadPromise: Promise<void> | null = null;
+
+export async function loadProductsFromAPI(): Promise<void> {
+  try {
+    const res = await fetch('/api/products', { cache: 'no-store' });
+    if (!res.ok) return;
+    const data: ProductDef[] = await res.json();
+    const amap = new Map<string, string>();
+    const nmap = new Map<string, string>();
+    for (const p of data) {
+      nmap.set(p.code, p.name);
+      amap.set(normalizeStr(p.code), p.code);
+      for (const alias of p.aliases ?? []) {
+        amap.set(normalizeStr(alias), p.code);
+      }
+    }
+    dynamicAliasMap = amap;
+    dynamicNameMap = nmap;
+  } catch {
+    // fallback do statycznej listy
+  }
+}
+
+export function ensureProductsLoaded(): Promise<void> {
+  if (dynamicAliasMap) return Promise.resolve();
+  if (!loadPromise) {
+    loadPromise = loadProductsFromAPI().finally(() => { loadPromise = null; });
+  }
+  return loadPromise;
+}
+
+export function invalidateProductsCache(): void {
+  dynamicAliasMap = null;
+  dynamicNameMap = null;
+}
+
+// ============================================================
+// STATYCZNY FALLBACK
+// ============================================================
+const STATIC_PRODUCTS: Record<string, string> = {
+  K: 'Kostka', KD: 'Kostka duża', KC: 'Kostka C', KB: 'Kostka B',
+  KO: 'Kostka odsort', OK: 'Odzysk Kostka', ST: 'Sticksy', OS: 'Odzysk Sticksy',
+  S: 'Semolina', SR: 'Semolina SR', SPG: 'Semolina po grysie',
+  SZ: 'Semolina żółta', SB: 'Semolina B', SO: 'Semolina Organic',
+  P: 'Proszek', PZ: 'Proszek żółty', G: 'Grys', GR: 'Granulat', GRYSIK: 'Grysik',
+  GBIO: 'Grys BIO', GRBIO: 'Granulat BIO', GRYSIKBIO: 'Grysik BIO',
+  KBIO: 'Kostka BIO', KBBIO: 'Kostka B BIO', KOBIO: 'Kostka odsort BIO',
+  KM: 'Kasza Manna',
 };
 
-const ALIASES_RAW: Record<string, string> = {
-  KOSTKA: 'K', K: 'K',
+const STATIC_ALIASES: Record<string, string> = {
+  K: 'K', KOSTKA: 'K',
   KD: 'KD', 'KOSTKA DUZA': 'KD', 'KOSTKA DUŻA': 'KD',
-  KM: 'KM', 'KOSTKA MALA': 'KM', 'KOSTKA MAŁA': 'KM',
   KC: 'KC', 'KOSTKA C': 'KC',
   KB: 'KB', 'KOSTKA B': 'KB',
-  KO: 'KO', 'KOSTKA ODSORT': 'KO', ODSORT: 'KO',
-  OK: 'OK', 'ODZYSK KOSTKA': 'OK', 'ODZYSK KOSTKI': 'OK',
-  ST: 'ST', STICKSY: 'ST', STICKS: 'ST',
-  OS: 'OS', 'ODZYSK STICKSY': 'OS', 'ODZYSK STICKS': 'OS', 'ODZYSK STICK': 'OS',
+  KO: 'KO', 'KOSTKA ODSORT': 'KO',
+  OK: 'OK', 'ODZYSK KOSTKA': 'OK',
+  ST: 'ST', STICKSY: 'ST',
+  OS: 'OS', 'ODZYSK STICKSY': 'OS',
   S: 'S', SEMOLINA: 'S',
   SR: 'SR', 'SEMOLINA SR': 'SR',
-  SZ: 'SZ', 'SŻ': 'SZ', 'SEMOLINA Z': 'SZ', 'SEMOLINA Ż': 'SZ',
-  'SEMOLINA ŻÓŁTA': 'SZ', 'SEMOLINA ZOLTA': 'SZ',
-  SPG: 'SPG', 'SEMOLINA SPG': 'SPG', 'SEMOLINA PO GRYSIE': 'SPG',
-  SO: 'SO', 'SEMOLINA ODSORT': 'SO',
+  SPG: 'SPG', 'SEMOLINA PO GRYSIE': 'SPG',
+  SZ: 'SZ', 'SEMOLINA ZOLTA': 'SZ', SŻ: 'SZ',
   SB: 'SB', 'SEMOLINA B': 'SB',
+  SO: 'SO', 'SEMOLINA ORGANIC': 'SO',
   P: 'P', PROSZEK: 'P',
-  PZ: 'PZ', 'PŻ': 'PZ', 'PROSZEK Z': 'PZ', 'PROSZEK Ż': 'PZ',
-  'PROSZEK ŻÓŁTY': 'PZ', 'PROSZEK ZOLTY': 'PZ',
-  PZG: 'PZG', 'PROSZEK ZG': 'PZG',
-  PZD: 'PZD', 'PROSZEK ZD': 'PZD',
+  PZ: 'PZ', 'PROSZEK ZOLTY': 'PZ', PŻ: 'PZ',
   G: 'G', GRYS: 'G',
   GR: 'GR', GRANULAT: 'GR',
-  SCORPION: 'SCORPION', WENTYLACJA: 'SCORPION',
   GRYSIK: 'GRYSIK',
-  SK: 'SK', SKORKI: 'SK', 'SKÓRKI': 'SK',
-  ZMIOTKI: 'ZMIOTKI', ZMIOKI: 'ZMIOTKI',
-  KBB: 'KBB', 'KOSTKA BB': 'KBB', 'K BB': 'KBB', 'KOSTKA BEZ BLANSZU': 'KBB',
-  SBB: 'SBB', 'SEMOLINA BB': 'SBB', 'S BB': 'SBB',
-  SRBB: 'SRBB', 'SEMOLINA SR BB': 'SRBB', 'SEMOLINA SRBB': 'SRBB',
-  GBB: 'GBB', 'GRYS BB': 'GBB', 'G BB': 'GBB',
-  GRBB: 'GRBB', 'GRANULAT BB': 'GRBB', 'GR BB': 'GRBB',
-  STBB: 'STBB', 'STICKSY BB': 'STBB', 'ST BB': 'STBB',
-  PBB: 'PBB', 'PROSZEK BB': 'PBB', 'P BB': 'PBB',
-  GRYSIKBB: 'GRYSIKBB', 'GRYSIK BB': 'GRYSIKBB',
-  KBIO: 'KBIO', 'KOSTKA BIO': 'KBIO', 'K BIO': 'KBIO',
-  KDBIO: 'KDBIO', 'KOSTKA DUŻA BIO': 'KDBIO',
-  KCBIO: 'KCBIO', 'KOSTKA C BIO': 'KCBIO',
-  KBBIO: 'KBBIO', 'KOSTKA B BIO': 'KBBIO',
-  KOBIO: 'KOBIO', 'KOSTKA ODSORT BIO': 'KOBIO',
-  OSBIO: 'OSBIO', 'ODZYSK STICKSY BIO': 'OSBIO',
-  STBIO: 'STBIO', 'STICKSY BIO': 'STBIO',
-  SBIO: 'SBIO', 'SEMOLINA BIO': 'SBIO', 'S BIO': 'SBIO',
-  SRBIO: 'SRBIO', 'SEMOLINA SR BIO': 'SRBIO', 'SEMOLINA SRBIO': 'SRBIO',
-  SZBIO: 'SZBIO', 'SŻBIO': 'SZBIO', 'SEMOLINA ŻÓŁTA BIO': 'SZBIO',
-  SPGBIO: 'SPGBIO', 'SEMOLINA SPG BIO': 'SPGBIO',
-  SBBIO: 'SBBIO', 'SEMOLINA B BIO': 'SBBIO',
-  PBIO: 'PBIO', 'PROSZEK BIO': 'PBIO',
-  PZBIO: 'PZBIO', 'PŻBIO': 'PZBIO', 'PROSZEK Z BIO': 'PZBIO', 'PROSZEK ŻÓŁTY BIO': 'PZBIO',
-  GBIO: 'GBIO', 'GRYS BIO': 'GBIO',
-  GRBIO: 'GRBIO', 'GRANULAT BIO': 'GRBIO',
+  GBIO: 'GBIO', 'GRYS BIO': 'GBIO', 'G BIO': 'GBIO',
+  GRBIO: 'GRBIO', 'GRANULAT BIO': 'GRBIO', 'GR BIO': 'GRBIO',
   GRYSIKBIO: 'GRYSIKBIO', 'GRYSIK BIO': 'GRYSIKBIO',
+  KBIO: 'KBIO', 'KOSTKA BIO': 'KBIO', 'K BIO': 'KBIO',
+  KBBIO: 'KBBIO', 'KOSTKA B BIO': 'KBBIO', 'KB BIO': 'KBBIO',
+  KOBIO: 'KOBIO', 'KOSTKA ODSORT BIO': 'KOBIO', 'KO BIO': 'KOBIO',
+  KM: 'KM', 'KASZA MANNA': 'KM',
 };
 
-function normalize(s: string): string {
-  return s.trim().toUpperCase().split(/\s+/).join(' ');
-}
-
-const ALIASES: Record<string, string> = {};
-for (const [k, v] of Object.entries(ALIASES_RAW)) ALIASES[normalize(k)] = v;
-
-export interface ParsedProduct {
-  code: string | null;
-  codeBot: string | null;
-  kwit: string | null;
-  isUnknown: boolean;
-}
-
-// Parsuje pojedynczą część (jedną stronę z góra/dół)
-function parsePart(s: string): { code: string | null; isUnknown: boolean } {
-  if (!s) return { code: null, isUnknown: false };
-  // Sama liczba = zwykła Kostka K
-  if (/^\d+$/.test(s)) return { code: 'K', isUnknown: false };
-  const norm = normalize(s);
-  if (ALIASES[norm]) return { code: ALIASES[norm], isUnknown: false };
-  return { code: 'UNKNOWN', isUnknown: true };
-}
-
-export function parseProductCode(raw: string | null | undefined): ParsedProduct {
-  if (!raw || !raw.toString().trim()) return { code: null, codeBot: null, kwit: null, isUnknown: false };
-  const s = raw.toString().trim();
-
-  if (s.includes('/')) {
-    const [first, second] = s.split('/', 2).map((p) => p.trim());
-    // Każda część jest produktem (osobno górą i dołem):
-    //   - sama liczba (np. "1580") = zwykła Kostka K
-    //   - alias produktu (np. "KBIO", "S") = ten produkt
-    const firstCode = parsePart(first);
-    const secondCode = parsePart(second);
-    // Zbierz kwit z którejkolwiek części która jest liczbą
-    const kwitParts: string[] = [];
-    if (/^\d+$/.test(first)) kwitParts.push(first);
-    if (/^\d+$/.test(second)) kwitParts.push(second);
-    return {
-      code: firstCode.code,
-      codeBot: secondCode.code,
-      kwit: kwitParts.length > 0 ? kwitParts.join(' / ') : null,
-      isUnknown: firstCode.isUnknown || secondCode.isUnknown,
-    };
-  }
-
-  if (/^\d+$/.test(s)) return { code: 'K', codeBot: null, kwit: s, isUnknown: false };
-
-  const norm = normalize(s);
-  if (ALIASES[norm]) return { code: ALIASES[norm], codeBot: null, kwit: null, isUnknown: false };
-  return { code: 'UNKNOWN', codeBot: null, kwit: null, isUnknown: true };
+function resolveAlias(norm: string): string | null {
+  // Najpierw dynamiczna mapa z bazy
+  if (dynamicAliasMap) return dynamicAliasMap.get(norm) ?? null;
+  // Fallback statyczny
+  return STATIC_ALIASES[norm] ?? null;
 }
 
 export function productName(code: string | null): string {
   if (!code) return '';
-  return PRODUCTS[code] ?? code;
+  if (dynamicNameMap) return dynamicNameMap.get(code) ?? code;
+  return STATIC_PRODUCTS[code] ?? code;
+}
+
+// ============================================================
+// PARSE — synchroniczny, używa załadowanej mapy
+// ============================================================
+function resolvePart(s: string): { code: string | null; kwit: string | null; isUnknown: boolean } {
+  if (!s) return { code: null, kwit: null, isUnknown: false };
+  if (/^\d+$/.test(s)) return { code: 'K', kwit: s, isUnknown: false };
+
+  // Kod + numer kwitu: "K 1580" lub "GRANULAT 1580"
+  const kwitMatch = s.match(/^(.+?)\s+(\d{3,})$/);
+  if (kwitMatch) {
+    const label = kwitMatch[1].trim();
+    const kwit = kwitMatch[2];
+    const norm = normalizeStr(label);
+    const code = resolveAlias(norm);
+    return code ? { code, kwit, isUnknown: false } : { code: 'UNKNOWN', kwit, isUnknown: true };
+  }
+
+  const norm = normalizeStr(s);
+  const code = resolveAlias(norm);
+  if (code) return { code, kwit: null, isUnknown: false };
+  return { code: 'UNKNOWN', kwit: null, isUnknown: true };
+}
+
+export function parseProductCode(raw: string): {
+  code: string | null;
+  codeBot: string | null;
+  kwit: string | null;
+  isUnknown: boolean;
+} {
+  if (!raw || !raw.trim()) return { code: null, codeBot: null, kwit: null, isUnknown: false };
+
+  const parts = raw.split('/').map(p => p.trim());
+
+  if (parts.length === 1) {
+    const r = resolvePart(parts[0]);
+    return { code: r.code, codeBot: null, kwit: r.kwit, isUnknown: r.isUnknown };
+  }
+
+  const top = resolvePart(parts[0]);
+  const bot = resolvePart(parts[1]);
+  return {
+    code: top.code,
+    codeBot: bot.code !== top.code ? bot.code : null,
+    kwit: top.kwit ?? bot.kwit,
+    isUnknown: top.isUnknown || bot.isUnknown,
+  };
 }

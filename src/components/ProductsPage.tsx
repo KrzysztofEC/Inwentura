@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { invalidateProductsCache } from '@/lib/products';
+import { invalidateProductsCache } from '@/app/actions';
 
 interface Product {
   id?: number;

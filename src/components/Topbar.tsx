@@ -12,6 +12,9 @@ export function Topbar({ user }: { user: { email?: string | null } | null }) {
             {c.name.replace('Magazyn ', '').replace(' (zewnętrzny)', '')}
           </Link>
         ))}
+        <Link href="/produkty" className="px-3 py-1 rounded hover:bg-gray-700 text-yellow-300">
+          ⚙ Produkty
+        </Link>
       </nav>
       <div className="ml-auto flex items-center gap-3 text-sm">
         {user?.email && <span className="text-gray-300 hidden sm:inline">{user.email}</span>}

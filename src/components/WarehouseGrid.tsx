@@ -359,7 +359,8 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
 
   function colWidth(col: string) { return isRoadCol(col) ? 45 : 70; }
 
-  function renderInput(col: string, row: number, field: Field) {
+    function renderInput(col: string, row: number, field: Field) {
+    void productsReady;
     const key = `${col}|${row}`; const st = states.get(key) ?? emptyState(); const status = saveStatus.get(key) ?? 'idle';
     const base = 'w-full px-1 py-1 border-0 outline-none bg-transparent focus:bg-yellow-100 focus:ring-2 focus:ring-blue-500 focus:ring-inset';
     if (field === 'kwit') return (

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { saveCell, clearCell } from '@/app/actions';
-import { parseProductCode, productName, ensureProductsLoaded } from '@/lib/products';
+import { parseProductCode, productName, loadProductsFromAPI } from '@/lib/products';
 import type { Cell } from '@/types/db';
 import type { WarehouseConfig } from '@/lib/warehouses';
 import { ROAD_COL_1, ROAD_COL_2, colsWithRoad } from '@/lib/warehouses';
@@ -34,6 +34,12 @@ function fromCell(c: Cell | undefined): CellState {
   };
 }
 
+function rebuildStates(cells: Cell[]): Map<string, CellState> {
+  const m = new Map<string, CellState>();
+  for (const c of cells) m.set(`${c.col}|${c.row}`, fromCell(c));
+  return m;
+}
+
 type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 
 function isRoadCol(col: string): boolean { return col === ROAD_COL_1 || col === ROAD_COL_2; }
@@ -41,11 +47,10 @@ function isRoadCol(col: string): boolean { return col === ROAD_COL_1 || col === 
 interface ClipboardCell { colOffset: number; rowOffset: number; state: CellState; }
 
 export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cell[] }) {
-  const [states, setStates] = useState<Map<string, CellState>>(() => {
-    const m = new Map<string, CellState>();
-    for (const c of cells) m.set(`${c.col}|${c.row}`, fromCell(c));
-    return m;
-  });
+  // Ładuj produkty z API PRZED inicjalizacją stanów
+  const [productsLoaded, setProductsLoaded] = useState(false);
+
+  const [states, setStates] = useState<Map<string, CellState>>(new Map());
   const statesRef = useRef(states);
   const [saveStatus, setSaveStatus] = useState<Map<string, SaveStatus>>(new Map());
   const saveStatusRef = useRef(saveStatus);
@@ -54,6 +59,16 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
   const inFlightRef = useRef<Set<string>>(new Set());
   const retryRef = useRef<Set<string>>(new Set());
   const tableRef = useRef<HTMLTableElement>(null);
+
+  // Załaduj produkty z API, potem zbuduj stany komórek
+  useEffect(() => {
+    loadProductsFromAPI().then(() => {
+      const m = rebuildStates(cells);
+      statesRef.current = m;
+      setStates(m);
+      setProductsLoaded(true);
+    });
+  }, []);
 
   // ZAZNACZANIE
   const [ctrlHeld, setCtrlHeld] = useState(false);
@@ -66,17 +81,8 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
   const [hasClipboard, setHasClipboard] = useState(false);
   const [hasCopied, setHasCopied] = useState(false);
 
-
-    // Załaduj produkty z bazy przy starcie
-  const [productsReady, setProductsReady] = useState(false);
-
-  useEffect(() => {
-    ensureProductsLoaded().then(() => {
-      setProductsReady(true);
-    });
-  }, []);
   const allCols = colsWithRoad(cfg);
-  const editableCols = allCols.filter(c => !isRoadCol(c));
+  const editableCols = allCols;
   const rowNumbers = (() => {
     const list: (number | 'M')[] = [];
     for (let i = 1; i <= cfg.rows!; i++) list.push(i);
@@ -146,9 +152,7 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     });
     for (const key of keys) {
       const [col, rowStr] = key.split('|');
-      if (!isRoadCol(col)) {
-        await clearCell({ warehouse: cfg.key, col, row: parseInt(rowStr, 10) });
-      }
+      await clearCell({ warehouse: cfg.key, col, row: parseInt(rowStr, 10) });
     }
     setSelected(new Set());
   }, [selected, cfg.key]);
@@ -174,18 +178,14 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     setTimeout(() => setHasCopied(false), 2000);
   }, [selected, allCols, numericRows]);
 
-  // Wyczyść schowek
   function clearClipboard() {
     clipboardRef.current = null;
     setHasClipboard(false);
   }
 
-  // Wklej — cel to lewa górna zaznaczona komórka
   const pasteClipboard = useCallback(async () => {
     const clipboard = clipboardRef.current;
     if (!clipboard || clipboard.length === 0 || selected.size === 0) return;
-
-    // Znajdź lewą górną zaznaczoną komórkę jako cel
     const positions = Array.from(selected).map(k => {
       const [col, rowStr] = k.split('|');
       return { key: k, colIdx: allCols.indexOf(col), rowIdx: numericRows.indexOf(parseInt(rowStr)) };
@@ -196,35 +196,25 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     const [targetCol, targetRowStr] = topLeft.key.split('|');
     const targetColIdx = allCols.indexOf(targetCol);
     const targetRowIdx = numericRows.indexOf(parseInt(targetRowStr));
-
     const toSave: { col: string; row: number; state: CellState }[] = [];
     for (const cell of clipboard) {
       const destColIdx = targetColIdx + cell.colOffset;
       const destRowIdx = targetRowIdx + cell.rowOffset;
       if (destColIdx < 0 || destColIdx >= allCols.length) continue;
       if (destRowIdx < 0 || destRowIdx >= numericRows.length) continue;
-      const destCol = allCols[destColIdx];
-      const destRow = numericRows[destRowIdx];
-      toSave.push({ col: destCol, row: destRow, state: cell.state });
+      toSave.push({ col: allCols[destColIdx], row: numericRows[destRowIdx], state: cell.state });
     }
-
     setStates(prev => {
       const next = new Map(prev);
       toSave.forEach(({ col, row, state }) => next.set(`${col}|${row}`, { ...state, dirty: true }));
       statesRef.current = next;
       return next;
     });
-
     for (const { col, row, state } of toSave) {
       if (!isRoadCol(col)) {
-        await saveCell({
-          warehouse: cfg.key, col, row,
-          raw_label: state.raw_label, starch: state.starch,
-          weight_top: state.weight_top, weight_bot: state.weight_bot, note: state.note,
-        });
+        await saveCell({ warehouse: cfg.key, col, row, raw_label: state.raw_label, starch: state.starch, weight_top: state.weight_top, weight_bot: state.weight_bot, note: state.note });
       }
     }
-    // Schowek zostaje — można wklejać wielokrotnie
     setSelected(new Set());
   }, [selected, allCols, numericRows, cfg.key]);
 
@@ -236,15 +226,9 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
         e.preventDefault();
         deleteSelected();
       }
-      if (e.key === 'Escape') {
-        setSelected(new Set());
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
-        if (selected.size > 0) { e.preventDefault(); copySelected(); }
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
-        if (clipboardRef.current && selected.size > 0) { e.preventDefault(); pasteClipboard(); }
-      }
+      if (e.key === 'Escape') setSelected(new Set());
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c') { if (selected.size > 0) { e.preventDefault(); copySelected(); } }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v') { if (clipboardRef.current && selected.size > 0) { e.preventDefault(); pasteClipboard(); } }
     }
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -359,8 +343,7 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
 
   function colWidth(col: string) { return isRoadCol(col) ? 45 : 70; }
 
-    function renderInput(col: string, row: number, field: Field) {
-    void productsReady;
+  function renderInput(col: string, row: number, field: Field) {
     const key = `${col}|${row}`; const st = states.get(key) ?? emptyState(); const status = saveStatus.get(key) ?? 'idle';
     const base = 'w-full px-1 py-1 border-0 outline-none bg-transparent focus:bg-yellow-100 focus:ring-2 focus:ring-blue-500 focus:ring-inset';
     if (field === 'kwit') return (
@@ -390,30 +373,31 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
       <td key={tdKey} colSpan={colSpan} className={`border ${border} p-0 align-middle ${bg} relative`}>
         {renderInput(col, row, field)}
         {ctrlHeld && (
-          <div
-            className="absolute inset-0 z-20"
+          <div className="absolute inset-0 z-20"
             style={{ cursor: 'crosshair', background: isSel ? 'rgba(59,130,246,0.15)' : 'transparent' }}
             onMouseDown={(e) => handleOverlayMouseDown(col, row, e)}
-            onMouseEnter={() => handleOverlayMouseEnter(col, row)}
-          />
+            onMouseEnter={() => handleOverlayMouseEnter(col, row)} />
         )}
         {isSel && <div className="absolute inset-0 border-2 border-blue-500 pointer-events-none z-30" />}
       </td>
     );
   }
 
+  if (!productsLoaded) {
+    return (
+      <div className="bg-white rounded shadow-sm p-8 text-center text-gray-400 text-sm">
+        Ładowanie listy produktów...
+      </div>
+    );
+  }
+
   return (
     <div className="bg-white rounded shadow-sm overflow-x-auto">
-      <SaveBar
-        states={states} saveStatus={saveStatus} flushAll={flushAll}
-        selected={selected} ctrlHeld={ctrlHeld}
-        hasClipboard={hasClipboard} hasCopied={hasCopied}
-        onDeleteSelected={deleteSelected}
-        onCopy={copySelected}
+      <SaveBar states={states} saveStatus={saveStatus} flushAll={flushAll}
+        selected={selected} ctrlHeld={ctrlHeld} hasClipboard={hasClipboard} hasCopied={hasCopied}
+        onDeleteSelected={deleteSelected} onCopy={copySelected}
         onPaste={selected.size > 0 && hasClipboard ? pasteClipboard : undefined}
-        onClearClipboard={clearClipboard}
-        onClearSelected={() => setSelected(new Set())}
-      />
+        onClearClipboard={clearClipboard} onClearSelected={() => setSelected(new Set())} />
       <table ref={tableRef} className="border-collapse w-full" style={{ tableLayout: 'fixed' }}>
         <colgroup>
           <col style={{ width: 36 }} /><col style={{ width: 70 }} />
@@ -505,7 +489,7 @@ function SaveBar({ states, saveStatus, flushAll, selected, ctrlHeld, hasClipboar
   if (hasCopied) return (
     <div className="px-2 py-1 text-xs bg-green-50 border-b border-green-200 text-green-800 flex items-center gap-2">
       <span className="w-2 h-2 rounded-full bg-green-500"></span>
-      Skopiowano! Zaznacz komórki docelowe i naciśnij Ctrl+V aby wkleić.
+      Skopiowano! Zaznacz komórki docelowe i naciśnij Ctrl+V.
       <button onClick={onClearClipboard} className="ml-auto bg-gray-200 hover:bg-gray-300 text-gray-600 px-2 py-0.5 rounded text-[11px]">✕ Wyczyść schowek</button>
     </div>
   );

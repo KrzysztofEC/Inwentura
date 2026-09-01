@@ -67,10 +67,12 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
   const [hasCopied, setHasCopied] = useState(false);
 
 
-  // Załaduj produkty z bazy przy starcie
+    // Załaduj produkty z bazy przy starcie
+  const [productsReady, setProductsReady] = useState(false);
+
   useEffect(() => {
     ensureProductsLoaded().then(() => {
-      setStates(prev => new Map(prev));
+      setProductsReady(true);
     });
   }, []);
   const allCols = colsWithRoad(cfg);

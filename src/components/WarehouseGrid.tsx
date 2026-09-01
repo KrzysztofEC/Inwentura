@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { saveCell, clearCell } from '@/app/actions';
-import { parseProductCode, productName } from '@/lib/products';
+import { parseProductCode, productName, ensureProductsLoaded } from '@/lib/products';
 import type { Cell } from '@/types/db';
 import type { WarehouseConfig } from '@/lib/warehouses';
 import { ROAD_COL_1, ROAD_COL_2, colsWithRoad } from '@/lib/warehouses';
@@ -66,8 +66,15 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
   const [hasClipboard, setHasClipboard] = useState(false);
   const [hasCopied, setHasCopied] = useState(false);
 
+
+  // Załaduj produkty z bazy przy starcie
+  useEffect(() => {
+    ensureProductsLoaded().then(() => {
+      setStates(prev => new Map(prev));
+    });
+  }, []);
   const allCols = colsWithRoad(cfg);
-  const editableCols = allCols;
+  const editableCols = allCols.filter(c => !isRoadCol(c));
   const rowNumbers = (() => {
     const list: (number | 'M')[] = [];
     for (let i = 1; i <= cfg.rows!; i++) list.push(i);
@@ -135,9 +142,11 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
       statesRef.current = next;
       return next;
     });
-        for (const key of keys) {
+    for (const key of keys) {
       const [col, rowStr] = key.split('|');
-      await clearCell({ warehouse: cfg.key, col, row: parseInt(rowStr, 10) });
+      if (!isRoadCol(col)) {
+        await clearCell({ warehouse: cfg.key, col, row: parseInt(rowStr, 10) });
+      }
     }
     setSelected(new Set());
   }, [selected, cfg.key]);

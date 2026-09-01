@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { Topbar } from '@/components/Topbar';
 import { WAREHOUSES, WAREHOUSE_KEYS } from '@/lib/warehouses';
-import { PRODUCTS, productName } from '@/lib/products';
+import { productName } from '@/lib/products';
 import { SnapshotButton } from '@/components/SnapshotButton';
 
 interface Row { code: string; name: string; per: Record<string, number>; total: number; }

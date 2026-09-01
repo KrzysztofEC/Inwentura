@@ -51,7 +51,7 @@ export const PRODUCTS: Record<string, string> = {
   GBIO: 'Grys BIO',
   GRBIO: 'Granulat BIO',
   GRYSIKBIO: 'Grysik BIO',
-  GRC: '5.2/GR'
+  GRC: '5.2/GR',
 };
 
 const ALIASES_RAW: Record<string, string> = {

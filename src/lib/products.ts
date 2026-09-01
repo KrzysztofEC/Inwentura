@@ -107,7 +107,7 @@ const ALIASES_RAW: Record<string, string> = {
   GBIO: 'GBIO', 'GRYS BIO': 'GBIO',
   GRBIO: 'GRBIO', 'GRANULAT BIO': 'GRBIO',
   GRYSIKBIO: 'GRYSIKBIO', 'GRYSIK BIO': 'GRYSIKBIO',
-  GRC: 'GRC', '5.2',
+  GRC: 'GRC',
 };
 
 function normalize(s: string): string {

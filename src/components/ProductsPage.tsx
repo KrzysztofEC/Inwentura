@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { invalidateProductsCache } from '@/lib/products';
 
 interface Product {
   id?: number;
@@ -51,12 +52,14 @@ export default function ProductsPage() {
       return;
     }
     setNewCode(''); setNewName(''); setNewAliases('');
+    invalidateProductsCache();
     showSuccess(`Dodano produkt ${code}`);
     load();
   }
 
   async function updateProduct(id: number, patch: Partial<Product>) {
     await supabase.from('products').update(patch).eq('id', id);
+    invalidateProductsCache();
     showSuccess('Zapisano');
     load();
   }
@@ -64,6 +67,7 @@ export default function ProductsPage() {
   async function deleteProduct(id: number, code: string) {
     if (!confirm(`Usunąć produkt "${code}"?`)) return;
     await supabase.from('products').delete().eq('id', id);
+    invalidateProductsCache();
     showSuccess(`Usunięto ${code}`);
     load();
   }

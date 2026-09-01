@@ -51,7 +51,6 @@ export const PRODUCTS: Record<string, string> = {
   GBIO: 'Grys BIO',
   GRBIO: 'Granulat BIO',
   GRYSIKBIO: 'Grysik BIO',
-  GRC: '5.2/GR',
 };
 
 const ALIASES_RAW: Record<string, string> = {
@@ -107,7 +106,6 @@ const ALIASES_RAW: Record<string, string> = {
   GBIO: 'GBIO', 'GRYS BIO': 'GBIO',
   GRBIO: 'GRBIO', 'GRANULAT BIO': 'GRBIO',
   GRYSIKBIO: 'GRYSIKBIO', 'GRYSIK BIO': 'GRYSIKBIO',
-  GRC: 'GRC',
 };
 
 function normalize(s: string): string {

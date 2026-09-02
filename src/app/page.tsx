@@ -1,7 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { Topbar } from '@/components/Topbar';
 import { WAREHOUSES, WAREHOUSE_KEYS } from '@/lib/warehouses';
-import { productName } from '@/lib/products';
 import { SnapshotButton } from '@/components/SnapshotButton';
 
 interface Row { code: string; name: string; per: Record<string, number>; total: number; }
@@ -17,13 +16,22 @@ export default async function HomePage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
+  // Pobierz nazwy produktów z bazy
+  const { data: productsData } = await supabase
+    .from('products')
+    .select('code, name');
+  const productNames: Record<string, string> = {};
+  for (const p of (productsData ?? []) as any[]) {
+    productNames[p.code] = p.name;
+  }
+
   const { data: totals } = await supabase.from('totals_per_warehouse').select('*');
 
   const grouped: Record<string, Row> = {};
   for (const t of (totals ?? []) as any[]) {
     const code = t.product_code as string;
     if (!grouped[code]) {
-      grouped[code] = { code, name: productName(code), per: {}, total: 0 };
+      grouped[code] = { code, name: productNames[code] ?? code, per: {}, total: 0 };
     }
     grouped[code].per[t.warehouse] = (grouped[code].per[t.warehouse] ?? 0) + Number(t.total ?? 0);
     grouped[code].total += Number(t.total ?? 0);

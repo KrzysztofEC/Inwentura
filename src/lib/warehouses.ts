@@ -20,7 +20,7 @@ export const WAREHOUSES: Record<string, WarehouseConfig> = {
   wiata:      { key: 'wiata',      name: 'Wiata',                type: 'grid',      cols: ['A','B','C','D','E','F','G'], rows: 13, middleRow: 'info' },
   kontenery:  { key: 'kontenery',  name: 'Kontenery',            type: 'kontenery', containers: 6 },
   nowa_hala: { key: 'nowa_hala', name: 'Nowa Hala', type: 'grid', cols: ['A','B','C','D','E','F','G','H','I','J','K'], rows: 13, middleRow: 'starch' },
-  nowa_hala_prawa: { key: 'nowa_hala_prawa', name: 'Nowa Hala Prawa', type: 'grid', cols: ['A','B','C','D'], rows: 15, middleRow: 'starch' },
+  nowa_hala_prawa: { key: 'nowa_hala_prawa', name: 'Nowa Hala Prawa', type: 'grid', cols: ['A','B','C','D','E'], rows: 15, middleRow: 'starch' },
   ambro:      { key: 'ambro',      name: 'Ambro (zewnętrzny)',   type: 'ambro' },
 };
 export const WAREHOUSE_KEYS = Object.keys(WAREHOUSES);

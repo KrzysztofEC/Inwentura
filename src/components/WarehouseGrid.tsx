@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { saveCell, clearCell } from '@/app/actions';
 import { parseProductCode, productName, loadProductsFromAPI } from '@/lib/products';
 import type { Cell } from '@/types/db';
@@ -46,6 +46,29 @@ function isRoadCol(col: string): boolean { return col === ROAD_COL_1 || col === 
 
 interface ClipboardCell { colOffset: number; rowOffset: number; state: CellState; }
 
+// ===== SUMOWANIE ZAZNACZENIA =====
+function toNum(s: string): number {
+  if (!s) return 0;
+  const n = parseFloat(s.replace(/\s/g, '').replace(',', '.'));
+  return isNaN(n) ? 0 : n;
+}
+
+function fmtKg(n: number): string {
+  return n.toLocaleString('pl-PL', { maximumFractionDigits: 2 }) + ' kg';
+}
+
+function plLokalizacje(n: number): string {
+  if (n === 1) return 'lokalizacja';
+  const d = n % 10, dd = n % 100;
+  if (d >= 2 && d <= 4 && (dd < 12 || dd > 14)) return 'lokalizacje';
+  return 'lokalizacji';
+}
+
+interface SelectionStats {
+  total: number; top: number; bot: number; filled: number;
+  byProduct: { name: string; kg: number }[];
+}
+
 export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cell[] }) {
   // Ładuj produkty z API PRZED inicjalizacją stanów
   const [productsLoaded, setProductsLoaded] = useState(false);
@@ -75,6 +98,8 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const isDragging = useRef(false);
   const dragStartRef = useRef<{ colIdx: number; rowIdx: number } | null>(null);
+  const baseSelRef = useRef<Set<string>>(new Set());
+  const dragModeRef = useRef<'add' | 'remove'>('add');
 
   // SCHOWEK
   const clipboardRef = useRef<ClipboardCell[] | null>(null);
@@ -96,9 +121,11 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) { if (e.key === 'Control' || e.key === 'Meta') setCtrlHeld(true); }
     function onKeyUp(e: KeyboardEvent) { if (e.key === 'Control' || e.key === 'Meta') setCtrlHeld(false); }
+    function onBlur() { setCtrlHeld(false); }
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
-    return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
+    window.addEventListener('blur', onBlur);
+    return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); window.removeEventListener('blur', onBlur); };
   }, []);
 
   function getRange(start: { colIdx: number; rowIdx: number }, end: { colIdx: number; rowIdx: number }): Set<string> {
@@ -115,15 +142,27 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     return s;
   }
 
+  // Dokłada (albo odejmuje) zakres do zaznaczenia sprzed rozpoczęcia przeciągania
+  function applyRange(range: Set<string>) {
+    const next = new Set(baseSelRef.current);
+    if (dragModeRef.current === 'add') range.forEach(k => next.add(k));
+    else range.forEach(k => next.delete(k));
+    setSelected(next);
+  }
+
   function handleOverlayMouseDown(col: string, row: number, e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
     const colIdx = editableCols.indexOf(col);
     const rowIdx = numericRows.indexOf(row);
     if (colIdx === -1 || rowIdx === -1) return;
+    const key = `${col}|${row}`;
+    baseSelRef.current = new Set(selected);
+    // Ctrl+klik na już zaznaczonej komórce = odznacz (jak w Excelu)
+    dragModeRef.current = selected.has(key) ? 'remove' : 'add';
     isDragging.current = true;
     dragStartRef.current = { colIdx, rowIdx };
-    setSelected(new Set([`${col}|${row}`]));
+    applyRange(new Set([key]));
   }
 
   function handleOverlayMouseEnter(col: string, row: number) {
@@ -131,7 +170,7 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     const colIdx = editableCols.indexOf(col);
     const rowIdx = numericRows.indexOf(row);
     if (colIdx === -1 || rowIdx === -1) return;
-    setSelected(getRange(dragStartRef.current, { colIdx, rowIdx }));
+    applyRange(getRange(dragStartRef.current, { colIdx, rowIdx }));
   }
 
   useEffect(() => {
@@ -139,6 +178,56 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     window.addEventListener('mouseup', onMouseUp);
     return () => window.removeEventListener('mouseup', onMouseUp);
   }, []);
+
+  // Zaznaczanie całych kolumn / wierszy / wszystkiego przez klik w nagłówek
+  function toggleKeys(keys: string[], additive: boolean) {
+    setSelected(prev => {
+      const allIn = keys.every(k => prev.has(k));
+      const next = additive ? new Set(prev) : new Set<string>();
+      if (additive && allIn) keys.forEach(k => next.delete(k));
+      else keys.forEach(k => next.add(k));
+      return next;
+    });
+  }
+  function selectColumn(col: string, e: React.MouseEvent) {
+    e.preventDefault();
+    toggleKeys(numericRows.map(r => `${col}|${r}`), e.ctrlKey || e.metaKey);
+  }
+  function selectRow(row: number, e: React.MouseEvent) {
+    e.preventDefault();
+    toggleKeys(editableCols.map(c => `${c}|${row}`), e.ctrlKey || e.metaKey);
+  }
+  function selectAll(e: React.MouseEvent) {
+    e.preventDefault();
+    const keys: string[] = [];
+    for (const c of editableCols) for (const r of numericRows) keys.push(`${c}|${r}`);
+    toggleKeys(keys, false);
+  }
+
+  // Suma wag zaznaczonych lokalizacji
+  const selectionStats: SelectionStats = useMemo(() => {
+    let total = 0, top = 0, bot = 0, filled = 0;
+    const byCode = new Map<string, number>();
+    const add = (code: string | null, kg: number) => {
+      const name = code && code !== 'UNKNOWN' ? (productName(code) || code) : 'Inne / nierozpoznane';
+      byCode.set(name, (byCode.get(name) ?? 0) + kg);
+    };
+    for (const key of Array.from(selected)) {
+      const st = states.get(key);
+      if (!st) continue;
+      const wt = toNum(st.weight_top);
+      const wb = toNum(st.weight_bot);
+      if (wt || wb) filled++;
+      top += wt; bot += wb;
+      if (wt) add(st.product_code, wt);
+      if (wb) add(st.product_code_bot ?? st.product_code, wb);
+    }
+    total = top + bot;
+    const byProduct = Array.from(byCode.entries())
+      .map(([name, kg]) => ({ name, kg }))
+      .sort((a, b) => b.kg - a.kg);
+    return { total, top, bot, filled, byProduct };
+  }, [selected, states]);
 
   // Delete zaznaczonych
   const deleteSelected = useCallback(async () => {
@@ -175,6 +264,8 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     clipboardRef.current = clipboard;
     setHasClipboard(true);
     setHasCopied(true);
+    // Po skopiowaniu czyścimy zaznaczenie, żeby następne Ctrl+zaznaczenie wskazywało tylko miejsce docelowe
+    setSelected(new Set());
     setTimeout(() => setHasCopied(false), 2000);
   }, [selected, allCols, numericRows]);
 
@@ -383,6 +474,13 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     );
   }
 
+  function isColFullySelected(col: string) {
+    return numericRows.length > 0 && numericRows.every(r => selected.has(`${col}|${r}`));
+  }
+  function isRowFullySelected(row: number) {
+    return editableCols.length > 0 && editableCols.every(c => selected.has(`${c}|${row}`));
+  }
+
   if (!productsLoaded) {
     return (
       <div className="bg-white rounded shadow-sm p-8 text-center text-gray-400 text-sm">
@@ -391,10 +489,12 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     );
   }
 
+  const headerClickable = 'cursor-pointer select-none hover:brightness-125';
+
   return (
     <div className="bg-white rounded shadow-sm overflow-x-auto">
       <SaveBar states={states} saveStatus={saveStatus} flushAll={flushAll}
-        selected={selected} ctrlHeld={ctrlHeld} hasClipboard={hasClipboard} hasCopied={hasCopied}
+        selected={selected} stats={selectionStats} ctrlHeld={ctrlHeld} hasClipboard={hasClipboard} hasCopied={hasCopied}
         onDeleteSelected={deleteSelected} onCopy={copySelected}
         onPaste={selected.size > 0 && hasClipboard ? pasteClipboard : undefined}
         onClearClipboard={clearClipboard} onClearSelected={() => setSelected(new Set())} />
@@ -404,10 +504,23 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
           {allCols.flatMap((col, idx) => [<col key={`g-${idx}`} style={{ width: colWidth(col) }} />, <col key={`d-${idx}`} style={{ width: colWidth(col) }} />])}
           <col style={{ width: 36 }} />
         </colgroup>
-        <thead className="sticky top-0 z-10">
+        <thead className="sticky top-0 z-40">
           <tr>
-            <th className="bg-gray-900 text-white"></th><th className="bg-gray-900 text-white text-xs">DATA</th>
-            {allCols.map((col, idx) => <th key={idx} colSpan={2} className={`text-sm font-bold py-1 border ${isRoadCol(col) ? 'bg-gray-500 text-white border-gray-700' : 'bg-gray-900 text-white border-gray-700'}`}>{isRoadCol(col) ? 'DROGA' : col}</th>)}
+            <th onClick={selectAll} title="Zaznacz wszystko" className={`bg-gray-900 text-white text-[10px] ${headerClickable}`}>◢</th>
+            <th className="bg-gray-900 text-white text-xs">DATA</th>
+            {allCols.map((col, idx) => {
+              const full = isColFullySelected(col);
+              const colorCls = full
+                ? 'bg-blue-600 text-white border-blue-800'
+                : isRoadCol(col) ? 'bg-gray-500 text-white border-gray-700' : 'bg-gray-900 text-white border-gray-700';
+              return (
+                <th key={idx} colSpan={2} onClick={(e) => selectColumn(col, e)}
+                  title="Klik = zaznacz kolumnę · Ctrl+klik = dodaj/odejmij kolumnę"
+                  className={`text-sm font-bold py-1 border ${colorCls} ${headerClickable}`}>
+                  {isRoadCol(col) ? 'DROGA' : col}
+                </th>
+              );
+            })}
             <th className="bg-gray-900 text-white"></th>
           </tr>
           <tr>
@@ -431,13 +544,15 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
             );
             const r = rNum as number;
             const nSubRows = hasMiddle ? 3 : 2;
+            const rowFull = isRowFullySelected(r);
+            const rowHeadCls = `${rowFull ? 'bg-blue-600' : 'bg-gray-900'} text-white w-9 text-center align-middle text-base font-bold border-gray-700 ${headerClickable}`;
             return (
               <>
                 <tr key={`${r}-kwit`} className="border-t-2 border-t-gray-700">
-                  <th rowSpan={nSubRows} className="bg-gray-900 text-white w-9 text-center align-middle text-base font-bold border-r-2 border-gray-700">{r}</th>
+                  <th rowSpan={nSubRows} onClick={(e) => selectRow(r, e)} title="Klik = zaznacz wiersz · Ctrl+klik = dodaj/odejmij wiersz" className={`${rowHeadCls} border-r-2`}>{r}</th>
                   <th className="bg-gray-100 border border-gray-300 text-[10px] font-semibold uppercase text-gray-700 px-1">KWIT</th>
                   {allCols.map((col, idx) => renderTd(col, r, 2, `${idx}-${r}-kwit`, 'kwit'))}
-                  <th rowSpan={nSubRows} className="bg-gray-900 text-white w-9 text-center align-middle text-base font-bold border-l-2 border-gray-700">{r}</th>
+                  <th rowSpan={nSubRows} onClick={(e) => selectRow(r, e)} title="Klik = zaznacz wiersz · Ctrl+klik = dodaj/odejmij wiersz" className={`${rowHeadCls} border-l-2`}>{r}</th>
                 </tr>
                 {hasMiddle && (
                   <tr key={`${r}-starch`}>
@@ -459,15 +574,17 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
       </table>
       <div className="text-xs text-gray-500 px-2 py-1.5 border-t bg-gray-50">
         <strong>Skróty:</strong> ↓↑ jeden rząd · →← w bok · Enter = pole niżej · Tab = następne pole · zapis automatyczny ·
-        <strong> Ctrl+przeciągnij</strong> = zaznacz · <strong>Ctrl+C</strong> = kopiuj · zaznacz cel + <strong>Ctrl+V</strong> = wklej · <strong>Delete</strong> = usuń · <strong>Esc</strong> = odznacz.
+        <strong> Ctrl+klik / Ctrl+przeciągnij</strong> = dodaj do zaznaczenia (na zaznaczonym = odejmij) ·
+        <strong> klik w literę kolumny / numer wiersza</strong> = zaznacz całość (z Ctrl = dodaj) ·
+        <strong> Ctrl+C</strong> = kopiuj · zaznacz cel + <strong>Ctrl+V</strong> = wklej · <strong>Delete</strong> = usuń · <strong>Esc</strong> = odznacz.
       </div>
     </div>
   );
 }
 
-function SaveBar({ states, saveStatus, flushAll, selected, ctrlHeld, hasClipboard, hasCopied, onDeleteSelected, onCopy, onPaste, onClearClipboard, onClearSelected }: {
+function SaveBar({ states, saveStatus, flushAll, selected, stats, ctrlHeld, hasClipboard, hasCopied, onDeleteSelected, onCopy, onPaste, onClearClipboard, onClearSelected }: {
   states: Map<string, CellState>; saveStatus: Map<string, SaveStatus>; flushAll: () => void;
-  selected: Set<string>; ctrlHeld: boolean; hasClipboard: boolean; hasCopied: boolean;
+  selected: Set<string>; stats: SelectionStats; ctrlHeld: boolean; hasClipboard: boolean; hasCopied: boolean;
   onDeleteSelected: () => void; onCopy: () => void; onPaste?: () => void;
   onClearClipboard: () => void; onClearSelected: () => void;
 }) {
@@ -476,13 +593,34 @@ function SaveBar({ states, saveStatus, flushAll, selected, ctrlHeld, hasClipboar
   for (const s of saveStatus.values()) { if (s === 'saving') saving++; else if (s === 'error') errors++; }
 
   if (selected.size > 0) return (
-    <div className="px-2 py-1 text-xs bg-blue-50 border-b border-blue-300 text-blue-900 flex items-center gap-2 flex-wrap">
-      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500"></span>Zaznaczono: <strong>{selected.size}</strong> {selected.size === 1 ? 'komórkę' : 'komórek'}</span>
-      <button onClick={onCopy} className="bg-green-600 hover:bg-green-700 text-white px-2 py-0.5 rounded text-[11px] font-semibold">📋 Kopiuj (Ctrl+C)</button>
-      {onPaste && <button onClick={onPaste} className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-0.5 rounded text-[11px] font-semibold">📌 Wklej tutaj (Ctrl+V)</button>}
-      <button onClick={onDeleteSelected} className="bg-red-600 hover:bg-red-700 text-white px-2 py-0.5 rounded text-[11px] font-semibold">🗑 Usuń (Delete)</button>
-      <button onClick={onClearSelected} className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-0.5 rounded text-[11px]">Odznacz (Esc)</button>
-      {hasClipboard && <button onClick={onClearClipboard} className="bg-gray-200 hover:bg-gray-300 text-gray-500 px-2 py-0.5 rounded text-[11px]">✕ Wyczyść schowek</button>}
+    <div className="sticky left-0 border-b border-blue-300 bg-blue-50 text-blue-900 text-xs">
+      <div className="px-2 py-1 flex items-center gap-2 flex-wrap">
+        <span className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+          Zaznaczono: <strong>{selected.size}</strong> {plLokalizacje(selected.size)}
+          {stats.filled !== selected.size && <span className="text-blue-700">(z wagą: {stats.filled})</span>}
+        </span>
+        <span className="bg-blue-600 text-white px-2 py-0.5 rounded font-bold text-[13px]">
+          Suma: {fmtKg(stats.total)}
+        </span>
+        <span className="text-blue-800">góra {fmtKg(stats.top)} · dół {fmtKg(stats.bot)}</span>
+        <span className="ml-auto flex items-center gap-2 flex-wrap">
+          <button onClick={onCopy} className="bg-green-600 hover:bg-green-700 text-white px-2 py-0.5 rounded text-[11px] font-semibold">📋 Kopiuj (Ctrl+C)</button>
+          {onPaste && <button onClick={onPaste} className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-0.5 rounded text-[11px] font-semibold">📌 Wklej tutaj (Ctrl+V)</button>}
+          <button onClick={onDeleteSelected} className="bg-red-600 hover:bg-red-700 text-white px-2 py-0.5 rounded text-[11px] font-semibold">🗑 Usuń (Delete)</button>
+          <button onClick={onClearSelected} className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-0.5 rounded text-[11px]">Odznacz (Esc)</button>
+          {hasClipboard && <button onClick={onClearClipboard} className="bg-gray-200 hover:bg-gray-300 text-gray-500 px-2 py-0.5 rounded text-[11px]">✕ Wyczyść schowek</button>}
+        </span>
+      </div>
+      {stats.byProduct.length > 0 && (
+        <div className="px-2 pb-1 flex items-center gap-1.5 flex-wrap">
+          {stats.byProduct.map(p => (
+            <span key={p.name} className="bg-white border border-blue-200 rounded px-1.5 py-0.5 text-[11px]">
+              {p.name}: <strong>{fmtKg(p.kg)}</strong>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 
@@ -505,7 +643,7 @@ function SaveBar({ states, saveStatus, flushAll, selected, ctrlHeld, hasClipboar
   if (ctrlHeld) return (
     <div className="px-2 py-1 text-xs bg-indigo-50 border-b border-indigo-200 text-indigo-800 flex items-center gap-2">
       <span className="w-2 h-2 rounded-full bg-indigo-400"></span>
-      Tryb zaznaczania — przeciągnij myszką po komórkach
+      Tryb zaznaczania — klikaj lub przeciągaj po komórkach, żeby policzyć sumę wagi
     </div>
   );
 

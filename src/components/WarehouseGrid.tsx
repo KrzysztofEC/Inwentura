@@ -46,6 +46,19 @@ function isRoadCol(col: string): boolean { return col === ROAD_COL_1 || col === 
 
 interface ClipboardCell { colOffset: number; rowOffset: number; state: CellState; }
 
+// Zaznaczenie trzymamy na poziomie pojedynczych wag: "B|1|t" = góra B1, "C|1|b" = dół C1
+type Level = 't' | 'b';
+type Hit = Level | 'both';
+function lk(col: string, row: number, lv: Level): string { return `${col}|${row}|${lv}`; }
+function locOf(key: string): string { const [c, r] = key.split('|'); return `${c}|${r}`; }
+function hitKeys(col: string, row: number, hit: Hit): string[] {
+  return hit === 'both' ? [lk(col, row, 't'), lk(col, row, 'b')] : [lk(col, row, hit)];
+}
+function fieldHit(field: Field): Hit {
+  return field === 'weight_top' ? 't' : field === 'weight_bot' ? 'b' : 'both';
+}
+type SelState = 'none' | 'partial' | 'full';
+
 // ===== SUMOWANIE ZAZNACZENIA =====
 function toNum(s: string): number {
   if (!s) return 0;
@@ -57,11 +70,11 @@ function fmtKg(n: number): string {
   return n.toLocaleString('pl-PL', { maximumFractionDigits: 2 }) + ' kg';
 }
 
-function plLokalizacje(n: number): string {
-  if (n === 1) return 'lokalizacja';
+function plPozycje(n: number): string {
+  if (n === 1) return 'pozycję';
   const d = n % 10, dd = n % 100;
-  if (d >= 2 && d <= 4 && (dd < 12 || dd > 14)) return 'lokalizacje';
-  return 'lokalizacji';
+  if (d >= 2 && d <= 4 && (dd < 12 || dd > 14)) return 'pozycje';
+  return 'pozycji';
 }
 
 interface SelectionStats {
@@ -97,7 +110,7 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
   const [ctrlHeld, setCtrlHeld] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const isDragging = useRef(false);
-  const dragStartRef = useRef<{ colIdx: number; rowIdx: number } | null>(null);
+  const dragStartRef = useRef<{ colIdx: number; rowIdx: number; hit: Hit } | null>(null);
   const baseSelRef = useRef<Set<string>>(new Set());
   const dragModeRef = useRef<'add' | 'remove'>('add');
 
@@ -128,17 +141,31 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); window.removeEventListener('blur', onBlur); };
   }, []);
 
-  function getRange(start: { colIdx: number; rowIdx: number }, end: { colIdx: number; rowIdx: number }): Set<string> {
-    const cMin = Math.min(start.colIdx, end.colIdx);
-    const cMax = Math.max(start.colIdx, end.colIdx);
+  function getRange(start: { colIdx: number; rowIdx: number; hit: Hit }, end: { colIdx: number; rowIdx: number; hit: Hit }): Set<string> {
     const rMin = Math.min(start.rowIdx, end.rowIdx);
     const rMax = Math.max(start.rowIdx, end.rowIdx);
     const s = new Set<string>();
-    for (let ci = cMin; ci <= cMax; ci++) {
-      for (let ri = rMin; ri <= rMax; ri++) {
-        s.add(`${editableCols[ci]}|${numericRows[ri]}`);
-      }
+    if (start.hit === 'both') {
+      // Start na KWIT/SKROBIA = całe lokalizacje (góra + dół)
+      const cMin = Math.min(start.colIdx, end.colIdx);
+      const cMax = Math.max(start.colIdx, end.colIdx);
+      for (let ci = cMin; ci <= cMax; ci++)
+        for (let ri = rMin; ri <= rMax; ri++) {
+          s.add(lk(editableCols[ci], numericRows[ri], 't'));
+          s.add(lk(editableCols[ci], numericRows[ri], 'b'));
+        }
+      return s;
     }
+    // Start na wadze = zakres po pojedynczych polach wag (góra/dół jako osobne kolumny)
+    const startSub = start.colIdx * 2 + (start.hit === 'b' ? 1 : 0);
+    let endSub: number;
+    if (end.hit === 'both') endSub = end.colIdx * 2 + (end.colIdx * 2 >= startSub ? 1 : 0);
+    else endSub = end.colIdx * 2 + (end.hit === 'b' ? 1 : 0);
+    const sMin = Math.min(startSub, endSub);
+    const sMax = Math.max(startSub, endSub);
+    for (let sub = sMin; sub <= sMax; sub++)
+      for (let ri = rMin; ri <= rMax; ri++)
+        s.add(lk(editableCols[Math.floor(sub / 2)], numericRows[ri], sub % 2 === 0 ? 't' : 'b'));
     return s;
   }
 
@@ -150,27 +177,27 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     setSelected(next);
   }
 
-  function handleOverlayMouseDown(col: string, row: number, e: React.MouseEvent) {
+  function handleOverlayMouseDown(col: string, row: number, hit: Hit, e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
     const colIdx = editableCols.indexOf(col);
     const rowIdx = numericRows.indexOf(row);
     if (colIdx === -1 || rowIdx === -1) return;
-    const key = `${col}|${row}`;
+    const keys = hitKeys(col, row, hit);
     baseSelRef.current = new Set(selected);
-    // Ctrl+klik na już zaznaczonej komórce = odznacz (jak w Excelu)
-    dragModeRef.current = selected.has(key) ? 'remove' : 'add';
+    // Ctrl+klik na już zaznaczonym polu = odznacz (jak w Excelu)
+    dragModeRef.current = keys.every(k => selected.has(k)) ? 'remove' : 'add';
     isDragging.current = true;
-    dragStartRef.current = { colIdx, rowIdx };
-    applyRange(new Set([key]));
+    dragStartRef.current = { colIdx, rowIdx, hit };
+    applyRange(new Set(keys));
   }
 
-  function handleOverlayMouseEnter(col: string, row: number) {
+  function handleOverlayMouseEnter(col: string, row: number, hit: Hit) {
     if (!isDragging.current || !dragStartRef.current) return;
     const colIdx = editableCols.indexOf(col);
     const rowIdx = numericRows.indexOf(row);
     if (colIdx === -1 || rowIdx === -1) return;
-    applyRange(getRange(dragStartRef.current, { colIdx, rowIdx }));
+    applyRange(getRange(dragStartRef.current, { colIdx, rowIdx, hit }));
   }
 
   useEffect(() => {
@@ -191,16 +218,16 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
   }
   function selectColumn(col: string, e: React.MouseEvent) {
     e.preventDefault();
-    toggleKeys(numericRows.map(r => `${col}|${r}`), e.ctrlKey || e.metaKey);
+    toggleKeys(numericRows.flatMap(r => hitKeys(col, r, 'both')), e.ctrlKey || e.metaKey);
   }
   function selectRow(row: number, e: React.MouseEvent) {
     e.preventDefault();
-    toggleKeys(editableCols.map(c => `${c}|${row}`), e.ctrlKey || e.metaKey);
+    toggleKeys(editableCols.flatMap(c => hitKeys(c, row, 'both')), e.ctrlKey || e.metaKey);
   }
   function selectAll(e: React.MouseEvent) {
     e.preventDefault();
     const keys: string[] = [];
-    for (const c of editableCols) for (const r of numericRows) keys.push(`${c}|${r}`);
+    for (const c of editableCols) for (const r of numericRows) keys.push(...hitKeys(c, r, 'both'));
     toggleKeys(keys, false);
   }
 
@@ -213,14 +240,14 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
       byCode.set(name, (byCode.get(name) ?? 0) + kg);
     };
     for (const key of Array.from(selected)) {
-      const st = states.get(key);
+      const st = states.get(locOf(key));
       if (!st) continue;
-      const wt = toNum(st.weight_top);
-      const wb = toNum(st.weight_bot);
-      if (wt || wb) filled++;
-      top += wt; bot += wb;
-      if (wt) add(st.product_code, wt);
-      if (wb) add(st.product_code_bot ?? st.product_code, wb);
+      const isTop = key.endsWith('|t');
+      const kg = toNum(isTop ? st.weight_top : st.weight_bot);
+      if (!kg) continue;
+      filled++;
+      if (isTop) { top += kg; add(st.product_code, kg); }
+      else { bot += kg; add(st.product_code_bot ?? st.product_code, kg); }
     }
     total = top + bot;
     const byProduct = Array.from(byCode.entries())
@@ -229,27 +256,43 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     return { total, top, bot, filled, byProduct };
   }, [selected, states]);
 
-  // Delete zaznaczonych
+  // Lokalizacje (col|row), w których coś jest zaznaczone — do kopiowania/wklejania
+  const selectedLocs = useMemo(() => new Set(Array.from(selected).map(locOf)), [selected]);
+
+  // Delete zaznaczonych: pełna lokalizacja = czyść całą komórkę, sam poziom = czyść tylko tę wagę
   const deleteSelected = useCallback(async () => {
     if (selected.size === 0) return;
-    const keys = Array.from(selected);
-    setStates(prev => {
-      const next = new Map(prev);
-      keys.forEach(key => next.set(key, { ...emptyState() }));
-      statesRef.current = next;
-      return next;
-    });
-    for (const key of keys) {
+    const fullLocs: string[] = [];
+    const partial: { col: string; row: number; lv: Level }[] = [];
+    for (const loc of Array.from(selectedLocs)) {
+      const [col, rowStr] = loc.split('|');
+      const row = parseInt(rowStr, 10);
+      const t = selected.has(lk(col, row, 't'));
+      const b = selected.has(lk(col, row, 'b'));
+      if (t && b) fullLocs.push(loc);
+      else partial.push({ col, row, lv: t ? 't' : 'b' });
+    }
+    for (const p of partial) update(p.col, p.row, p.lv === 't' ? { weight_top: '' } : { weight_bot: '' });
+    if (fullLocs.length > 0) {
+      setStates(prev => {
+        const next = new Map(prev);
+        fullLocs.forEach(key => next.set(key, { ...emptyState() }));
+        statesRef.current = next;
+        return next;
+      });
+    }
+    setSelected(new Set());
+    for (const key of fullLocs) {
       const [col, rowStr] = key.split('|');
       await clearCell({ warehouse: cfg.key, col, row: parseInt(rowStr, 10) });
     }
-    setSelected(new Set());
-  }, [selected, cfg.key]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, selectedLocs, cfg.key]);
 
   // Kopiuj zaznaczone
   const copySelected = useCallback(() => {
-    if (selected.size === 0) return;
-    const keys = Array.from(selected);
+    if (selectedLocs.size === 0) return;
+    const keys = Array.from(selectedLocs);
     const positions = keys.map(k => {
       const [col, rowStr] = k.split('|');
       return { col, row: parseInt(rowStr), colIdx: allCols.indexOf(col), rowIdx: numericRows.indexOf(parseInt(rowStr)) };
@@ -267,7 +310,7 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     // Po skopiowaniu czyścimy zaznaczenie, żeby następne Ctrl+zaznaczenie wskazywało tylko miejsce docelowe
     setSelected(new Set());
     setTimeout(() => setHasCopied(false), 2000);
-  }, [selected, allCols, numericRows]);
+  }, [selectedLocs, allCols, numericRows]);
 
   function clearClipboard() {
     clipboardRef.current = null;
@@ -276,8 +319,8 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
 
   const pasteClipboard = useCallback(async () => {
     const clipboard = clipboardRef.current;
-    if (!clipboard || clipboard.length === 0 || selected.size === 0) return;
-    const positions = Array.from(selected).map(k => {
+    if (!clipboard || clipboard.length === 0 || selectedLocs.size === 0) return;
+    const positions = Array.from(selectedLocs).map(k => {
       const [col, rowStr] = k.split('|');
       return { key: k, colIdx: allCols.indexOf(col), rowIdx: numericRows.indexOf(parseInt(rowStr)) };
     });
@@ -307,7 +350,7 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
       }
     }
     setSelected(new Set());
-  }, [selected, allCols, numericRows, cfg.key]);
+  }, [selectedLocs, allCols, numericRows, cfg.key]);
 
   // Klawiatura
   useEffect(() => {
@@ -424,8 +467,9 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
   const middleLabel = cfg.middleRow === 'info' ? 'INFO' : 'SKROBIA';
   const hasMiddle = !!cfg.middleRow;
 
-  function cellBg(st: CellState, col: string, isSel: boolean): string {
-    if (isSel) return 'bg-blue-100';
+  function cellBg(st: CellState, col: string, sel: SelState): string {
+    if (sel === 'full') return 'bg-blue-100';
+    if (sel === 'partial') return 'bg-blue-50';
     const road = isRoadCol(col);
     if (st.isUnknown) return 'bg-red-100';
     if (st.product_code || st.weight_top || st.weight_bot) return road ? 'bg-yellow-100' : 'bg-green-50';
@@ -457,28 +501,32 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     const road = isRoadCol(col);
     const key = `${col}|${row}`;
     const st = states.get(key) ?? emptyState();
-    const isSel = selected.has(key);
-    const bg = cellBg(st, col, isSel);
+    const hit = fieldHit(field);
+    const hk = hitKeys(col, row, hit);
+    const nSel = hk.filter(k => selected.has(k)).length;
+    const sel: SelState = nSel === 0 ? 'none' : nSel === hk.length ? 'full' : 'partial';
+    const bg = cellBg(st, col, sel);
     const border = road ? 'border-gray-500' : 'border-gray-300';
     return (
       <td key={tdKey} colSpan={colSpan} className={`border ${border} p-0 align-middle ${bg} relative`}>
         {renderInput(col, row, field)}
         {ctrlHeld && (
           <div className="absolute inset-0 z-20"
-            style={{ cursor: 'crosshair', background: isSel ? 'rgba(59,130,246,0.15)' : 'transparent' }}
-            onMouseDown={(e) => handleOverlayMouseDown(col, row, e)}
-            onMouseEnter={() => handleOverlayMouseEnter(col, row)} />
+            style={{ cursor: 'crosshair', background: sel === 'full' ? 'rgba(59,130,246,0.15)' : 'transparent' }}
+            onMouseDown={(e) => handleOverlayMouseDown(col, row, hit, e)}
+            onMouseEnter={() => handleOverlayMouseEnter(col, row, hit)} />
         )}
-        {isSel && <div className="absolute inset-0 border-2 border-blue-500 pointer-events-none z-30" />}
+        {sel === 'full' && <div className="absolute inset-0 border-2 border-blue-500 pointer-events-none z-30" />}
+        {sel === 'partial' && <div className="absolute inset-0 border-2 border-dashed border-blue-400 pointer-events-none z-30" />}
       </td>
     );
   }
 
   function isColFullySelected(col: string) {
-    return numericRows.length > 0 && numericRows.every(r => selected.has(`${col}|${r}`));
+    return numericRows.length > 0 && numericRows.every(r => hitKeys(col, r, 'both').every(k => selected.has(k)));
   }
   function isRowFullySelected(row: number) {
-    return editableCols.length > 0 && editableCols.every(c => selected.has(`${c}|${row}`));
+    return editableCols.length > 0 && editableCols.every(c => hitKeys(c, row, 'both').every(k => selected.has(k)));
   }
 
   if (!productsLoaded) {
@@ -574,7 +622,7 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
       </table>
       <div className="text-xs text-gray-500 px-2 py-1.5 border-t bg-gray-50">
         <strong>Skróty:</strong> ↓↑ jeden rząd · →← w bok · Enter = pole niżej · Tab = następne pole · zapis automatyczny ·
-        <strong> Ctrl+klik / Ctrl+przeciągnij</strong> = dodaj do zaznaczenia (na zaznaczonym = odejmij) ·
+        <strong> Ctrl+klik / Ctrl+przeciągnij</strong> = dodaj do zaznaczenia (na wadze = tylko ten poziom, na KWIT = góra+dół; na zaznaczonym = odejmij) ·
         <strong> klik w literę kolumny / numer wiersza</strong> = zaznacz całość (z Ctrl = dodaj) ·
         <strong> Ctrl+C</strong> = kopiuj · zaznacz cel + <strong>Ctrl+V</strong> = wklej · <strong>Delete</strong> = usuń · <strong>Esc</strong> = odznacz.
       </div>
@@ -597,7 +645,7 @@ function SaveBar({ states, saveStatus, flushAll, selected, stats, ctrlHeld, hasC
       <div className="px-2 py-1 flex items-center gap-2 flex-wrap">
         <span className="flex items-center gap-1">
           <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-          Zaznaczono: <strong>{selected.size}</strong> {plLokalizacje(selected.size)}
+          Zaznaczono: <strong>{selected.size}</strong> {plPozycje(selected.size)}
           {stats.filled !== selected.size && <span className="text-blue-700">(z wagą: {stats.filled})</span>}
         </span>
         <span className="bg-blue-600 text-white px-2 py-0.5 rounded font-bold text-[13px]">
@@ -643,7 +691,7 @@ function SaveBar({ states, saveStatus, flushAll, selected, stats, ctrlHeld, hasC
   if (ctrlHeld) return (
     <div className="px-2 py-1 text-xs bg-indigo-50 border-b border-indigo-200 text-indigo-800 flex items-center gap-2">
       <span className="w-2 h-2 rounded-full bg-indigo-400"></span>
-      Tryb zaznaczania — klikaj lub przeciągaj po komórkach, żeby policzyć sumę wagi
+      Tryb zaznaczania — klik na wadze = tylko ten poziom, klik na KWIT = góra + dół
     </div>
   );
 

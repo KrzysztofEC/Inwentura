@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
-import { buildInventoryWorkbook, type ExportCell, type ExportTotal } from '@/lib/exportWorkbook';
+import { buildInventoryWorkbook, type ExportCell, type ExportTotal, type ExportProduct } from '@/lib/exportWorkbook';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -23,15 +23,14 @@ export async function GET() {
   const { data: totalsData } = await supabase.from('totals_per_warehouse').select('*');
   const totals = (totalsData ?? []) as ExportTotal[];
 
-  const { data: productsData } = await supabase.from('products').select('code, name');
-  const names: Record<string, string> = {};
-  for (const p of (productsData ?? []) as { code: string; name: string }[]) names[p.code] = p.name;
+  const { data: productsData } = await supabase.from('products').select('code, name, aliases');
+  const products = (productsData ?? []) as ExportProduct[];
 
   const now = new Date();
   const dateStr = now.toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw', dateStyle: 'short', timeStyle: 'short' });
   const fileDate = now.toLocaleDateString('sv-SE', { timeZone: 'Europe/Warsaw' });
 
-  const wb = await buildInventoryWorkbook(cells, totals, names, dateStr);
+  const wb = await buildInventoryWorkbook(cells, totals, products, dateStr);
   const buffer = await wb.xlsx.writeBuffer();
 
   return new Response(buffer as ArrayBuffer, {

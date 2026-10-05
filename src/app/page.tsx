@@ -51,7 +51,7 @@ export default async function HomePage() {
           </div>
           <div className="flex gap-2">
             <SnapshotButton />
-            <a href="/api/export" className="bg-gray-200 hover:bg-gray-300 px-3 py-2 rounded text-sm">⬇ CSV</a>
+            <a href="/api/export" className="bg-gray-200 hover:bg-gray-300 px-3 py-2 rounded text-sm">⬇ Excel</a>
           </div>
         </div>
 

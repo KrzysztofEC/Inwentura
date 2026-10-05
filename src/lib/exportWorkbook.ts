@@ -10,17 +10,20 @@ export interface ExportCell {
   product_code: string | null; product_code_bot: string | null;
 }
 export interface ExportTotal { warehouse: string; product_code: string; total: number | string | null; }
+export interface ExportProduct { code: string; name: string; aliases?: string[] | string | null; }
 
 // Jeden wiersz arkusza "Dane": jedna waga (góra albo dół) w jednej lokalizacji
 interface DaneEntry {
   sheet: string; loc: string; level: string; label: string; code: string;
   ref: string; value: number | null;
+  labelRef?: string;            // odwołanie do komórki KWIT na mapie (tylko magazyny w rzucie)
+  part?: 'top' | 'bot';         // która część etykiety "góra/dół" dotyczy tej wagi
 }
 
 const FONT = 'Arial';
 const DARK = 'FF1E293B';
 const NUM_FMT = '#,##0;-#,##0;""';
-const UNKNOWN_CODE = '?';
+const UNKNOWN_CODE = 'NIEROZP';
 
 const thin: Partial<ExcelJS.Borders> = {
   top: { style: 'thin', color: { argb: 'FFBFBFBF' } }, left: { style: 'thin', color: { argb: 'FFBFBFBF' } },
@@ -182,8 +185,9 @@ function buildGridSheet(
 
       const loc = locName(col, rn);
       const label = st?.raw_label ?? '';
-      dane.push({ sheet, loc, level: 'góra', label, code: codeTop, ref: `${q(sheet)}!${wcTop.address}`, value: wt });
-      dane.push({ sheet, loc, level: 'dół', label, code: codeBot, ref: `${q(sheet)}!${wcBot.address}`, value: wb_ });
+      const labelRef = `${q(sheet)}!${kc.address}`;
+      dane.push({ sheet, loc, level: 'góra', label, code: codeTop, ref: `${q(sheet)}!${wcTop.address}`, value: wt, labelRef, part: 'top' });
+      dane.push({ sheet, loc, level: 'dół', label, code: codeBot, ref: `${q(sheet)}!${wcBot.address}`, value: wb_, labelRef, part: 'bot' });
     });
     r += nSub;
   }
@@ -272,13 +276,30 @@ function buildListSheet(
   tc.numFmt = NUM_FMT; tc.font = { name: FONT, bold: true }; tc.fill = fill('FFFDE68A');
 }
 
+// ===== Rozpoznawanie etykiet (ta sama logika co parseProductCode w aplikacji) =====
+const DIAC: Record<string, string> = { 'Ą': 'A', 'Ć': 'C', 'Ę': 'E', 'Ł': 'L', 'Ń': 'N', 'Ó': 'O', 'Ś': 'S', 'Ź': 'Z', 'Ż': 'Z' };
+function up(s: string) { return s.trim().replace(/\s+/g, ' ').toUpperCase(); }
+function noDiac(s: string) { return s.replace(/[ĄĆĘŁŃÓŚŹŻ]/g, ch => DIAC[ch] ?? ch); }
+function splitPart(label: string, part: 'top' | 'bot'): string {
+  const i = label.indexOf('/');
+  if (i < 0) return label.trim();
+  return (part === 'top' ? label.slice(0, i) : label.slice(i + 1)).trim();
+}
+function baseOf(p: string): string {
+  const m = p.match(/^(.+?)\s+(\d{3,})$/);
+  return m ? m[1].trim() : p;
+}
+
 // ===== Główna funkcja =====
 export async function buildInventoryWorkbook(
-  cells: ExportCell[], totals: ExportTotal[], names: Record<string, string>, dateStr: string,
+  cells: ExportCell[], totals: ExportTotal[], products: ExportProduct[], dateStr: string,
 ): Promise<ExcelJS.Workbook> {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Magazyn APP';
   wb.calcProperties.fullCalcOnLoad = true;
+
+  const names: Record<string, string> = {};
+  for (const p of products) names[p.code] = p.name;
 
   const cellMap = new Map<string, ExportCell>();
   for (const c of cells) cellMap.set(`${c.warehouse}|${c.col}|${c.row}`, c);
@@ -297,41 +318,117 @@ export async function buildInventoryWorkbook(
     whSheets.push({ key, sheet: sheetNameOf(cfg) });
   }
 
-  // ===== Arkusz "Dane" – każda waga jako odwołanie do komórki na mapie =====
+  // ===== Arkusz "Produkty" – słownik: alias -> kod =====
+  const aliasMap = new Map<string, string>(); // ALIAS (wielkie litery) -> kod
+  const addAlias = (alias: string | null | undefined, code: string) => {
+    if (!alias || !code) return;
+    const a = up(alias);
+    if (!a) return;
+    if (!aliasMap.has(a)) aliasMap.set(a, code);
+    const nd = noDiac(a);
+    if (!aliasMap.has(nd)) aliasMap.set(nd, code);
+  };
+  for (const p of products) {
+    addAlias(p.code, p.code);
+    addAlias(p.name, p.code);
+    const al = Array.isArray(p.aliases) ? p.aliases : typeof p.aliases === 'string' ? p.aliases.split(/[,;]/) : [];
+    for (const a of al) addAlias(a, p.code);
+  }
+  // Etykiety, które aplikacja już rozpoznała, też trafiają do słownika
+  for (const c of cells) {
+    if (!c.raw_label) continue;
+    const top = baseOf(splitPart(c.raw_label, 'top'));
+    const bot = baseOf(splitPart(c.raw_label, 'bot'));
+    if (c.product_code && c.product_code !== 'UNKNOWN' && !/^\d+$/.test(top)) addAlias(top, c.product_code);
+    const cb = c.product_code_bot ?? c.product_code;
+    if (cb && cb !== 'UNKNOWN' && !/^\d+$/.test(bot)) addAlias(bot, cb);
+  }
+  const ps = wb.addWorksheet('Produkty', { views: [{ state: 'frozen', ySplit: 1 }] });
+  ['Kod', 'Nazwa', 'Alias (etykieta na mapie)'].forEach((h, i) => {
+    const c = ps.getCell(1, i + 1);
+    c.value = h; c.font = { name: FONT, bold: true, color: { argb: 'FFFFFFFF' } }; c.fill = fill(DARK);
+  });
+  [10, 30, 28].forEach((w, i) => (ps.getColumn(i + 1).width = w));
+  const aliasRows = Array.from(aliasMap.entries()).sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]));
+  aliasRows.forEach(([alias, code], i) => {
+    ps.getCell(i + 2, 1).value = code;
+    ps.getCell(i + 2, 2).value = names[code] ?? code;
+    ps.getCell(i + 2, 3).value = alias;
+    for (let c = 1; c <= 3; c++) ps.getCell(i + 2, c).font = { name: FONT, size: 10 };
+  });
+  ps.getCell(1, 5).value = 'Nowy produkt lub inna nazwa na mapie? Dopisz wiersz: kod, nazwa, alias WIELKIMI literami.';
+  ps.getCell(1, 5).font = { name: FONT, italic: true, size: 9, color: { argb: 'FF6B7280' } };
+
+  const resolveJs = (label: string, part: 'top' | 'bot', weight: number): string => {
+    const p = splitPart(label, part);
+    const b = baseOf(p);
+    if (!b) return weight ? UNKNOWN_CODE : '';
+    if (!isNaN(Number(b.replace(',', '.')))) return 'K';
+    return aliasMap.get(up(b)) ?? UNKNOWN_CODE;
+  };
+
+  // ===== Arkusz "Dane" – etykieta i waga jako odwołania do map, kod wyliczany formułą =====
   const ds = wb.addWorksheet('Dane', { views: [{ state: 'frozen', ySplit: 1 }] });
-  const dh = ['Magazyn', 'Lokalizacja', 'Poziom', 'Etykieta (KWIT)', 'Kod produktu', 'Waga (kg)'];
-  [18, 12, 8, 18, 12, 12].forEach((w, i) => (ds.getColumn(i + 1).width = w));
+  const dh = ['Magazyn', 'Lokalizacja', 'Poziom', 'Etykieta (KWIT)', 'Część etykiety', 'Nazwa bez kwitu', 'Kod produktu', 'Waga (kg)'];
+  [18, 12, 8, 18, 16, 16, 12, 12].forEach((w, i) => (ds.getColumn(i + 1).width = w));
   dh.forEach((h, i) => {
     const c = ds.getCell(1, i + 1);
     c.value = h; c.font = { name: FONT, bold: true, color: { argb: 'FFFFFFFF' } }; c.fill = fill(DARK);
   });
+  const LASTWORD = (x: string) => `TRIM(RIGHT(SUBSTITUTE(${x}," ",REPT(" ",60)),60))`;
   dane.forEach((d, i) => {
     const r = i + 2;
     ds.getCell(r, 1).value = d.sheet;
     ds.getCell(r, 2).value = d.loc;
     ds.getCell(r, 3).value = d.level;
-    ds.getCell(r, 4).value = d.label || null;
-    ds.getCell(r, 5).value = d.code || null;
-    // Odwołanie do mapy; pusta komórka na mapie daje 0
-    ds.getCell(r, 6).value = { formula: `N(${d.ref})`, result: d.value ?? 0 };
-    ds.getCell(r, 6).numFmt = NUM_FMT;
-    for (let c = 1; c <= 6; c++) ds.getCell(r, c).font = { name: FONT, size: 10 };
+    const w = d.value ?? 0;
+    ds.getCell(r, 8).value = { formula: `N(${d.ref})`, result: w };
+    ds.getCell(r, 8).numFmt = NUM_FMT;
+
+    if (d.labelRef && d.part) {
+      const label = d.label ?? '';
+      const part = splitPart(label, d.part);
+      const base = baseOf(part);
+      ds.getCell(r, 4).value = { formula: `TRIM(${d.labelRef}&"")`, result: label.trim() };
+      ds.getCell(r, 5).value = d.part === 'top'
+        ? { formula: `IF(ISNUMBER(FIND("/",D${r})),TRIM(LEFT(D${r},FIND("/",D${r})-1)),D${r})`, result: part }
+        : { formula: `IF(ISNUMBER(FIND("/",D${r})),TRIM(MID(D${r},FIND("/",D${r})+1,200)),D${r})`, result: part };
+      ds.getCell(r, 6).value = {
+        formula: `IF(AND(ISNUMBER(FIND(" ",E${r})),ISNUMBER(--${LASTWORD(`E${r}`)}),LEN(${LASTWORD(`E${r}`)})>=3),TRIM(LEFT(E${r},LEN(E${r})-LEN(${LASTWORD(`E${r}`)}))),E${r})`,
+        result: base,
+      };
+      ds.getCell(r, 7).value = {
+        formula: `IF(F${r}="",IF(H${r}<>0,"${UNKNOWN_CODE}",""),IF(ISNUMBER(--F${r}),"K",IFERROR(INDEX(Produkty!$A:$A,MATCH(UPPER(TRIM(F${r})),Produkty!$C:$C,0)),"${UNKNOWN_CODE}")))`,
+        result: resolveJs(label, d.part, w),
+      };
+    } else {
+      ds.getCell(r, 7).value = d.code || null;
+    }
+    for (let c = 1; c <= 8; c++) ds.getCell(r, c).font = { name: FONT, size: 10 };
   });
   const lastDane = Math.max(dane.length + 1, 2);
-  ds.autoFilter = { from: 'A1', to: `F${lastDane}` };
+  ds.autoFilter = { from: 'A1', to: `H${lastDane}` };
 
   // ===== Arkusz "Podsumowanie" =====
+  // Wartości startowe (pokazywane zanim Excel przeliczy) – liczone tą samą logiką co formuły
   const agg = new Map<string, Map<string, number>>();
-  for (const d of dane) {
-    if (!d.code || !d.value) continue;
-    if (!agg.has(d.code)) agg.set(d.code, new Map());
-    const m = agg.get(d.code)!;
-    m.set(d.sheet, (m.get(d.sheet) ?? 0) + d.value);
-  }
-  const totalOf = (code: string) => Array.from(agg.get(code)!.values()).reduce((a, b) => a + b, 0);
-  const codes = Array.from(agg.keys())
-    .filter(c => totalOf(c) !== 0)
-    .sort((a, b) => (a === UNKNOWN_CODE ? 1 : b === UNKNOWN_CODE ? -1 : totalOf(b) - totalOf(a)));
+  dane.forEach(d => {
+    const w = d.value ?? 0;
+    if (!w) return;
+    const code = d.labelRef && d.part ? resolveJs(d.label ?? '', d.part, w) : d.code;
+    if (!code) return;
+    if (!agg.has(code)) agg.set(code, new Map());
+    const m = agg.get(code)!;
+    m.set(d.sheet, (m.get(d.sheet) ?? 0) + w);
+  });
+  const totalOf = (code: string) => Array.from(agg.get(code)?.values() ?? []).reduce((a, b) => a + b, 0);
+
+  // Wszystkie produkty z bazy + kody z danych + wiersz "?" na końcu
+  const codeSet = new Set<string>(products.map(p => p.code));
+  agg.forEach((_, c) => codeSet.add(c));
+  codeSet.delete(UNKNOWN_CODE);
+  const codes = Array.from(codeSet).sort((a, b) => totalOf(b) - totalOf(a) || a.localeCompare(b));
+  codes.push(UNKNOWN_CODE);
 
   const nWh = whSheets.length;
   const sumCol = 3 + nWh;          // SUMA
@@ -349,7 +446,7 @@ export async function buildInventoryWorkbook(
   summary.getCell(1, 1).value = `Podsumowanie produktów — stan na ${dateStr}`;
   summary.getCell(1, 1).font = { name: FONT, bold: true, size: 14 };
   summary.mergeCells(2, 1, 2, diffCol);
-  summary.getCell(2, 1).value = 'Sumy liczą się z arkusza „Dane” (odwołania do map). Zmiana wagi na mapie przelicza podsumowanie. Kolumnę „Spis z natury” wypełnij przy inwenturze.';
+  summary.getCell(2, 1).value = 'Wszystko przelicza się z map: zmiana etykiety lub wagi na mapie aktualizuje podsumowanie. Kolumnę „Spis z natury” wypełnij przy inwenturze.';
   summary.getCell(2, 1).font = { name: FONT, italic: true, size: 9, color: { argb: 'FF6B7280' } };
 
   const headers = ['Kod', 'Nazwa', ...whSheets.map(w => w.sheet), 'SUMA', 'Spis z natury', 'Różnica'];
@@ -369,12 +466,12 @@ export async function buildInventoryWorkbook(
   codes.forEach((code, idx) => {
     const r = firstRow + idx;
     summary.getCell(r, 1).value = code;
-    summary.getCell(r, 2).value = code === UNKNOWN_CODE ? 'Nierozpoznane etykiety (sprawdź mapy)' : (names[code] ?? code);
+    summary.getCell(r, 2).value = code === UNKNOWN_CODE ? 'Nierozpoznane etykiety (sprawdź mapy / arkusz Produkty)' : (names[code] ?? code);
     whSheets.forEach((w, i) => {
       const c = summary.getCell(r, 3 + i);
       c.value = {
-        formula: `SUMIFS(Dane!$F:$F,Dane!$A:$A,"${w.sheet}",Dane!$E:$E,$A${r})`,
-        result: agg.get(code)!.get(w.sheet) ?? 0,
+        formula: `SUMIFS(Dane!$H:$H,Dane!$A:$A,"${w.sheet}",Dane!$G:$G,$A${r})`,
+        result: agg.get(code)?.get(w.sheet) ?? 0,
       };
     });
     const sL = summary.getColumn(3).letter, eL = summary.getColumn(sumCol - 1).letter;
@@ -391,6 +488,7 @@ export async function buildInventoryWorkbook(
       if (c === spisCol) cell.fill = fill('FFFFFFCC');
     }
   });
+  summary.autoFilter = { from: { row: 3, column: 1 }, to: { row: firstRow + codes.length - 1, column: diffCol } };
 
   // Wiersz RAZEM
   const lastRow = firstRow + codes.length - 1;
@@ -399,12 +497,10 @@ export async function buildInventoryWorkbook(
   for (let c = 3; c <= diffCol; c++) {
     const L = summary.getColumn(c).letter;
     const cell = summary.getCell(totR, c);
-    if (codes.length > 0) {
-      let result: number | string = 0;
-      if (c < sumCol) result = codes.reduce((a, code) => a + (agg.get(code)!.get(whSheets[c - 3].sheet) ?? 0), 0);
-      else if (c === sumCol) result = codes.reduce((a, code) => a + totalOf(code), 0);
-      cell.value = { formula: `SUM(${L}${firstRow}:${L}${lastRow})`, result };
-    }
+    let result: number = 0;
+    if (c < sumCol) result = codes.reduce((a, code) => a + (agg.get(code)?.get(whSheets[c - 3].sheet) ?? 0), 0);
+    else if (c === sumCol) result = codes.reduce((a, code) => a + totalOf(code), 0);
+    cell.value = { formula: `SUM(${L}${firstRow}:${L}${lastRow})`, result };
     cell.numFmt = NUM_FMT;
   }
   for (let c = 1; c <= diffCol; c++) {

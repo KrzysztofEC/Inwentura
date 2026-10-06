@@ -111,6 +111,11 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const isDragging = useRef(false);
   const dragStartRef = useRef<{ colIdx: number; rowIdx: number; hit: Hit } | null>(null);
+  // Przeciąganie zaczyna się dopiero po przesunięciu myszy o kilka pikseli,
+  // żeby drobne drgnięcie przy Ctrl+klik nie łapało sąsiedniej komórki
+  const dragPointRef = useRef<{ x: number; y: number } | null>(null);
+  const dragActiveRef = useRef(false);
+  const lastHoverRef = useRef<string>('');
   const baseSelRef = useRef<Set<string>>(new Set());
   const dragModeRef = useRef<'add' | 'remove'>('add');
 
@@ -188,12 +193,25 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     // Ctrl+klik na już zaznaczonym polu = odznacz (jak w Excelu)
     dragModeRef.current = keys.every(k => selected.has(k)) ? 'remove' : 'add';
     isDragging.current = true;
+    dragActiveRef.current = false;
+    dragPointRef.current = { x: e.clientX, y: e.clientY };
+    lastHoverRef.current = `${col}|${row}|${hit}`;
     dragStartRef.current = { colIdx, rowIdx, hit };
     applyRange(new Set(keys));
   }
 
-  function handleOverlayMouseEnter(col: string, row: number, hit: Hit) {
+  function handleOverlayMouseMove(col: string, row: number, hit: Hit, e: React.MouseEvent) {
     if (!isDragging.current || !dragStartRef.current) return;
+    // Przycisk myszy już puszczony (np. puszczony poza oknem) = koniec przeciągania
+    if ((e.buttons & 1) === 0) { isDragging.current = false; return; }
+    if (!dragActiveRef.current) {
+      const p = dragPointRef.current;
+      if (!p || Math.hypot(e.clientX - p.x, e.clientY - p.y) < 8) return;
+      dragActiveRef.current = true;
+    }
+    const hoverKey = `${col}|${row}|${hit}`;
+    if (hoverKey === lastHoverRef.current) return;
+    lastHoverRef.current = hoverKey;
     const colIdx = editableCols.indexOf(col);
     const rowIdx = numericRows.indexOf(row);
     if (colIdx === -1 || rowIdx === -1) return;
@@ -201,9 +219,10 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
   }
 
   useEffect(() => {
-    function onMouseUp() { isDragging.current = false; }
+    function onMouseUp() { isDragging.current = false; dragActiveRef.current = false; }
     window.addEventListener('mouseup', onMouseUp);
-    return () => window.removeEventListener('mouseup', onMouseUp);
+    window.addEventListener('blur', onMouseUp);
+    return () => { window.removeEventListener('mouseup', onMouseUp); window.removeEventListener('blur', onMouseUp); };
   }, []);
 
   // Zaznaczanie całych kolumn / wierszy / wszystkiego przez klik w nagłówek
@@ -514,7 +533,7 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
           <div className="absolute inset-0 z-20"
             style={{ cursor: 'crosshair', background: sel === 'full' ? 'rgba(59,130,246,0.15)' : 'transparent' }}
             onMouseDown={(e) => handleOverlayMouseDown(col, row, hit, e)}
-            onMouseEnter={() => handleOverlayMouseEnter(col, row, hit)} />
+            onMouseMove={(e) => handleOverlayMouseMove(col, row, hit, e)} />
         )}
         {sel === 'full' && <div className="absolute inset-0 border-2 border-blue-500 pointer-events-none z-30" />}
         {sel === 'partial' && <div className="absolute inset-0 border-2 border-dashed border-blue-400 pointer-events-none z-30" />}

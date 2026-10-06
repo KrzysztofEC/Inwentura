@@ -107,17 +107,12 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
   }, []);
 
   // ZAZNACZANIE
-  const [ctrlHeld, setCtrlHeld] = useState(false);
+  const [ctrlDown, setCtrlDown] = useState(false);
+  const [shiftDown, setShiftDown] = useState(false);
+  const ctrlHeld = ctrlDown || shiftDown; // tryb zaznaczania: nakładka nad komórkami
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const isDragging = useRef(false);
-  const dragStartRef = useRef<{ colIdx: number; rowIdx: number; hit: Hit } | null>(null);
-  // Przeciąganie zaczyna się dopiero po przesunięciu myszy o kilka pikseli,
-  // żeby drobne drgnięcie przy Ctrl+klik nie łapało sąsiedniej komórki
-  const dragPointRef = useRef<{ x: number; y: number } | null>(null);
-  const dragActiveRef = useRef(false);
-  const lastHoverRef = useRef<string>('');
-  const baseSelRef = useRef<Set<string>>(new Set());
-  const dragModeRef = useRef<'add' | 'remove'>('add');
+  // Punkt zaczepienia dla Shift+klik (ostatnio kliknięte pole)
+  const anchorRef = useRef<{ colIdx: number; rowIdx: number; hit: Hit } | null>(null);
 
   // SCHOWEK
   const clipboardRef = useRef<ClipboardCell[] | null>(null);
@@ -135,11 +130,17 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
   })();
   const numericRows = rowNumbers.filter(r => r !== 'M') as number[];
 
-  // Nasłuch Ctrl
+  // Nasłuch Ctrl / Shift
   useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) { if (e.key === 'Control' || e.key === 'Meta') setCtrlHeld(true); }
-    function onKeyUp(e: KeyboardEvent) { if (e.key === 'Control' || e.key === 'Meta') setCtrlHeld(false); }
-    function onBlur() { setCtrlHeld(false); }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Control' || e.key === 'Meta') setCtrlDown(true);
+      if (e.key === 'Shift') setShiftDown(true);
+    }
+    function onKeyUp(e: KeyboardEvent) {
+      if (e.key === 'Control' || e.key === 'Meta') setCtrlDown(false);
+      if (e.key === 'Shift') setShiftDown(false);
+    }
+    function onBlur() { setCtrlDown(false); setShiftDown(false); }
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('blur', onBlur);
@@ -174,56 +175,32 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     return s;
   }
 
-  // Dokłada (albo odejmuje) zakres do zaznaczenia sprzed rozpoczęcia przeciągania
-  function applyRange(range: Set<string>) {
-    const next = new Set(baseSelRef.current);
-    if (dragModeRef.current === 'add') range.forEach(k => next.add(k));
-    else range.forEach(k => next.delete(k));
-    setSelected(next);
-  }
-
+  // Ctrl+klik = przełącz dokładnie jedno kliknięte pole (bez przeciągania, więc nic "nie dokłada się" samo)
+  // Shift+klik = dołóż prostokąt od ostatnio klikniętego pola do bieżącego
   function handleOverlayMouseDown(col: string, row: number, hit: Hit, e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
+    if (e.button !== 0) return;
     const colIdx = editableCols.indexOf(col);
     const rowIdx = numericRows.indexOf(row);
     if (colIdx === -1 || rowIdx === -1) return;
-    const keys = hitKeys(col, row, hit);
-    baseSelRef.current = new Set(selected);
-    // Ctrl+klik na już zaznaczonym polu = odznacz (jak w Excelu)
-    dragModeRef.current = keys.every(k => selected.has(k)) ? 'remove' : 'add';
-    isDragging.current = true;
-    dragActiveRef.current = false;
-    dragPointRef.current = { x: e.clientX, y: e.clientY };
-    lastHoverRef.current = `${col}|${row}|${hit}`;
-    dragStartRef.current = { colIdx, rowIdx, hit };
-    applyRange(new Set(keys));
-  }
+    const target = { colIdx, rowIdx, hit };
 
-  function handleOverlayMouseMove(col: string, row: number, hit: Hit, e: React.MouseEvent) {
-    if (!isDragging.current || !dragStartRef.current) return;
-    // Przycisk myszy już puszczony (np. puszczony poza oknem) = koniec przeciągania
-    if ((e.buttons & 1) === 0) { isDragging.current = false; return; }
-    if (!dragActiveRef.current) {
-      const p = dragPointRef.current;
-      if (!p || Math.hypot(e.clientX - p.x, e.clientY - p.y) < 8) return;
-      dragActiveRef.current = true;
+    if (e.shiftKey && anchorRef.current) {
+      const range = getRange(anchorRef.current, target);
+      setSelected(prev => { const next = new Set(prev); range.forEach(k => next.add(k)); return next; });
+      return;
     }
-    const hoverKey = `${col}|${row}|${hit}`;
-    if (hoverKey === lastHoverRef.current) return;
-    lastHoverRef.current = hoverKey;
-    const colIdx = editableCols.indexOf(col);
-    const rowIdx = numericRows.indexOf(row);
-    if (colIdx === -1 || rowIdx === -1) return;
-    applyRange(getRange(dragStartRef.current, { colIdx, rowIdx, hit }));
-  }
 
-  useEffect(() => {
-    function onMouseUp() { isDragging.current = false; dragActiveRef.current = false; }
-    window.addEventListener('mouseup', onMouseUp);
-    window.addEventListener('blur', onMouseUp);
-    return () => { window.removeEventListener('mouseup', onMouseUp); window.removeEventListener('blur', onMouseUp); };
-  }, []);
+    const keys = hitKeys(col, row, hit);
+    setSelected(prev => {
+      const next = new Set(prev);
+      const allIn = keys.every(k => prev.has(k));
+      keys.forEach(k => (allIn ? next.delete(k) : next.add(k)));
+      return next;
+    });
+    anchorRef.current = target;
+  }
 
   // Zaznaczanie całych kolumn / wierszy / wszystkiego przez klik w nagłówek
   function toggleKeys(keys: string[], additive: boolean) {
@@ -532,8 +509,7 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
         {ctrlHeld && (
           <div className="absolute inset-0 z-20"
             style={{ cursor: 'crosshair', background: sel === 'full' ? 'rgba(59,130,246,0.15)' : 'transparent' }}
-            onMouseDown={(e) => handleOverlayMouseDown(col, row, hit, e)}
-            onMouseMove={(e) => handleOverlayMouseMove(col, row, hit, e)} />
+            onMouseDown={(e) => handleOverlayMouseDown(col, row, hit, e)} />
         )}
         {sel === 'full' && <div className="absolute inset-0 border-2 border-blue-500 pointer-events-none z-30" />}
         {sel === 'partial' && <div className="absolute inset-0 border-2 border-dashed border-blue-400 pointer-events-none z-30" />}
@@ -641,7 +617,7 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
       </table>
       <div className="text-xs text-gray-500 px-2 py-1.5 border-t bg-gray-50">
         <strong>Skróty:</strong> ↓↑ jeden rząd · →← w bok · Enter = pole niżej · Tab = następne pole · zapis automatyczny ·
-        <strong> Ctrl+klik / Ctrl+przeciągnij</strong> = dodaj do zaznaczenia (na wadze = tylko ten poziom, na KWIT = góra+dół; na zaznaczonym = odejmij) ·
+        <strong> Ctrl+klik</strong> = dodaj/odejmij pole (na wadze = tylko ten poziom, na KWIT = góra+dół) · <strong>Shift+klik</strong> = zakres od ostatnio klikniętego ·
         <strong> klik w literę kolumny / numer wiersza</strong> = zaznacz całość (z Ctrl = dodaj) ·
         <strong> Ctrl+C</strong> = kopiuj · zaznacz cel + <strong>Ctrl+V</strong> = wklej · <strong>Delete</strong> = usuń · <strong>Esc</strong> = odznacz.
       </div>
@@ -702,7 +678,7 @@ function SaveBar({ states, saveStatus, flushAll, selected, stats, ctrlHeld, hasC
   if (hasClipboard) return (
     <div className="px-2 py-1 text-xs bg-indigo-50 border-b border-indigo-200 text-indigo-800 flex items-center gap-2">
       <span className="w-2 h-2 rounded-full bg-indigo-400"></span>
-      Schowek gotowy — zaznacz cel (Ctrl+przeciągnij) i naciśnij Ctrl+V
+      Schowek gotowy — zaznacz cel (Ctrl+klik) i naciśnij Ctrl+V
       <button onClick={onClearClipboard} className="ml-auto bg-gray-200 hover:bg-gray-300 text-gray-600 px-2 py-0.5 rounded text-[11px]">✕ Wyczyść schowek</button>
     </div>
   );
@@ -710,7 +686,7 @@ function SaveBar({ states, saveStatus, flushAll, selected, stats, ctrlHeld, hasC
   if (ctrlHeld) return (
     <div className="px-2 py-1 text-xs bg-indigo-50 border-b border-indigo-200 text-indigo-800 flex items-center gap-2">
       <span className="w-2 h-2 rounded-full bg-indigo-400"></span>
-      Tryb zaznaczania — klik na wadze = tylko ten poziom, klik na KWIT = góra + dół
+      Tryb zaznaczania — Ctrl+klik: na wadze = tylko ten poziom, na KWIT = góra + dół · Shift+klik = zakres
     </div>
   );
 

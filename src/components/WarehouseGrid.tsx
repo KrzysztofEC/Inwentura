@@ -118,6 +118,8 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
   const lastHoverRef = useRef<string>('');
   const baseSelRef = useRef<Set<string>>(new Set());
   const dragModeRef = useRef<'add' | 'remove'>('add');
+  const dragAdditiveRef = useRef(false);   // przeciąganie z Shift = dokładanie zakresu
+  const replaceNextRef = useRef(false);    // po Ctrl+C następny klik zaczyna nowe zaznaczenie (cel wklejania)
 
   // SCHOWEK
   const clipboardRef = useRef<ClipboardCell[] | null>(null);
@@ -188,8 +190,9 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     setSelected(next);
   }
 
-  // Ctrl + klik/przeciągnij        = NOWE zaznaczenie (zastępuje poprzednie) – jak dawniej
-  // Ctrl + Shift + klik/przeciągnij = DOŁÓŻ do zaznaczenia (na zaznaczonym = odejmij) – do sumowania rozproszonych pól
+  // Ctrl + przeciągnij          = NOWE zaznaczenie zakresu (zastępuje poprzednie)
+  // Ctrl + klik (bez ruchu)      = dołóż / odejmij jedno pole (jak w Excelu)
+  // Ctrl + Shift + przeciągnij   = dołóż zakres do istniejącego zaznaczenia
   function handleOverlayMouseDown(col: string, row: number, hit: Hit, e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
@@ -198,9 +201,12 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
     const rowIdx = numericRows.indexOf(row);
     if (colIdx === -1 || rowIdx === -1) return;
     const keys = hitKeys(col, row, hit);
-    const additive = e.shiftKey;
-    baseSelRef.current = additive ? new Set(selected) : new Set();
-    dragModeRef.current = additive && keys.every(k => selected.has(k)) ? 'remove' : 'add';
+    // Klik traktujemy jako dokładanie; jeśli okaże się przeciąganiem bez Shift, zamieni się w nowe zaznaczenie
+    const base = replaceNextRef.current ? new Set<string>() : new Set(selected);
+    replaceNextRef.current = false;
+    baseSelRef.current = base;
+    dragAdditiveRef.current = e.shiftKey;
+    dragModeRef.current = keys.every(k => base.has(k)) ? 'remove' : 'add';
     isDragging.current = true;
     dragActiveRef.current = false;
     dragPointRef.current = { x: e.clientX, y: e.clientY };
@@ -216,6 +222,11 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
       const p = dragPointRef.current;
       if (!p || Math.hypot(e.clientX - p.x, e.clientY - p.y) < 6) return;
       dragActiveRef.current = true;
+      if (!dragAdditiveRef.current) {
+        // Zwykłe przeciąganie = nowy zakres, poprzednie zaznaczenie znika
+        baseSelRef.current = new Set();
+        dragModeRef.current = 'add';
+      }
     }
     const hoverKey = `${col}|${row}|${hit}`;
     if (hoverKey === lastHoverRef.current) return;
@@ -332,6 +343,7 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
       state: { ...(statesRef.current.get(`${p.col}|${p.row}`) ?? emptyState()) },
     }));
     clipboardRef.current = clipboard;
+    replaceNextRef.current = true;
     setHasClipboard(true);
     setHasCopied(true);
     setTimeout(() => setHasCopied(false), 2000);
@@ -647,7 +659,7 @@ export function WarehouseGrid({ cfg, cells }: { cfg: WarehouseConfig; cells: Cel
       </table>
       <div className="text-xs text-gray-500 px-2 py-1.5 border-t bg-gray-50">
         <strong>Skróty:</strong> ↓↑ jeden rząd · →← w bok · Enter = pole niżej · Tab = następne pole · zapis automatyczny ·
-        <strong> Ctrl+klik / Ctrl+przeciągnij</strong> = zaznacz (na wadze = tylko ten poziom, na KWIT = góra+dół) · <strong>Ctrl+Shift+klik / przeciągnij</strong> = dołóż do zaznaczenia (na zaznaczonym = odejmij) ·
+        <strong> Ctrl+przeciągnij</strong> = zaznacz zakres · <strong>Ctrl+klik</strong> = dołóż/odejmij pole (na wadze = tylko ten poziom, na KWIT = góra+dół) · <strong>Ctrl+Shift+przeciągnij</strong> = dołóż kolejny zakres ·
         <strong> klik w literę kolumny / numer wiersza</strong> = zaznacz całość (z Ctrl = dodaj) ·
         <strong> Ctrl+C</strong> = kopiuj · zaznacz cel + <strong>Ctrl+V</strong> = wklej · <strong>Delete</strong> = usuń · <strong>Esc</strong> = odznacz.
       </div>
@@ -716,7 +728,7 @@ function SaveBar({ states, saveStatus, flushAll, selected, stats, ctrlHeld, hasC
   if (ctrlHeld) return (
     <div className="px-2 py-1 text-xs bg-indigo-50 border-b border-indigo-200 text-indigo-800 flex items-center gap-2">
       <span className="w-2 h-2 rounded-full bg-indigo-400"></span>
-      Tryb zaznaczania — przeciągnij myszką · dodaj Shift, żeby dokładać kolejne pola do sumy
+      Tryb zaznaczania — przeciągnij = nowy zakres · klik = dołóż pole · Shift+przeciągnij = dołóż zakres
     </div>
   );
 

@@ -27,10 +27,12 @@ function fieldMatches(value: string | null | undefined, filter: string): boolean
 function anyFieldMatches(r: AmbroRow, filter: string): boolean {
   if (!filter.trim()) return true;
   const f = filter.trim();
+  // Tylko dokładne dopasowanie kodu produktu
   if (fieldMatches(r.product_code, f)) return true;
-  const looseFields = [r.kwit, r.notes, r.issue_date, r.receive_date,
-    r.wydanie_ambro?.toString(), r.przyjecie_ec?.toString(), r.ilosc_palet?.toString()];
-  return looseFields.some(v => v?.toLowerCase().includes(f.toLowerCase()));
+  // Dla kwitu, dat — tylko jeśli zaczyna się od szukanej frazy
+  const looseFields = [r.kwit, r.issue_date, r.receive_date];
+  return looseFields.some(v => v?.toLowerCase().startsWith(f.toLowerCase()));
+}
 }
 
 function rowKey(r: AmbroRow): string {

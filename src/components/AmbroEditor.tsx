@@ -33,7 +33,6 @@ function anyFieldMatches(r: AmbroRow, filter: string): boolean {
   const looseFields = [r.kwit, r.issue_date, r.receive_date];
   return looseFields.some(v => v?.toLowerCase().startsWith(f.toLowerCase()));
 }
-}
 
 function rowKey(r: AmbroRow): string {
   return r.id ? `id-${r.id}` : r._tmpId;

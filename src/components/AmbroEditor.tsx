@@ -27,7 +27,6 @@ function fieldMatches(value: string | null | undefined, filter: string): boolean
 function anyFieldMatches(r: AmbroRow, filter: string): boolean {
   if (!filter.trim()) return true;
   const f = filter.trim();
-  if (fieldMatches(r.raw_label, f)) return true;
   if (fieldMatches(r.product_code, f)) return true;
   const looseFields = [r.kwit, r.notes, r.issue_date, r.receive_date,
     r.wydanie_ambro?.toString(), r.przyjecie_ec?.toString(), r.ilosc_palet?.toString()];
@@ -128,7 +127,8 @@ export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
     const r = rowsRef.current.find(row => rowKey(row) === rKey);
     if (!r) return;
     if (r.id) {
-      if (!confirm('Usunąć ten wpis?')) return;
+      const confirmed = window.confirm(`Czy na pewno chcesz usunąć wiersz "${r.raw_label ?? ''}"?\n\nTej operacji nie można cofnąć.`);
+      if (!confirmed) return;
       startTransition(async () => {
         await deleteAmbro(r.id);
         setRows((prev) => { const next = prev.filter(row => rowKey(row) !== rKey); rowsRef.current = next; return next; });

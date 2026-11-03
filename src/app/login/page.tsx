@@ -65,6 +65,9 @@ function LoginForm() {
         className="w-full text-sm text-gray-600 hover:text-gray-900">
         {mode === 'login' ? 'Nie masz konta? Załóż' : 'Masz konto? Zaloguj się'}
       </button>
+      <a href="/reset-hasla" className="block text-center text-sm text-gray-500 hover:text-gray-900 mt-3">
+  Nie pamiętasz hasła?
+</a>
     </form>
   );
 }

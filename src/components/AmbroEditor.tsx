@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, useTransition, useMemo, useCallback } from 'react';
+import { useRef, useState, useTransition, useMemo, useLayoutEffect } from 'react';
 import { saveAmbro, deleteAmbro } from '@/app/actions';
 import { parseProductCode } from '@/lib/products';
 import type { AmbroEntry } from '@/types/db';
@@ -36,6 +36,53 @@ function anyFieldMatches(r: AmbroRow, filter: string): boolean {
 
 function rowKey(r: AmbroRow): string {
   return r.id ? `id-${r.id}` : r._tmpId;
+}
+
+// Szerokości kolumn – JEDNA definicja dla nagłówka i wierszy, więc zawsze są w jednej linii
+const COLS: { label: string; width?: number; align?: 'left' | 'center' }[] = [
+  { label: 'Kod', width: 120 },
+  { label: 'Waga Stan', width: 110, align: 'center' },
+  { label: 'Wydanie do Ambro', width: 120 },
+  { label: 'Przyjęcie do EC', width: 120 },
+  { label: 'Ilość Palet', width: 90 },
+  { label: 'Nr KW', width: 110 },
+  { label: 'Wydanie', width: 140 },
+  { label: 'Przyjęcie EC', width: 140 },
+  { label: 'Uwagi' },            // reszta szerokości
+  { label: '', width: 36 },
+];
+const MIN_TABLE_WIDTH = 1300;
+
+// Pole tekstowe, które samo rośnie w dół, gdy tekst się nie mieści
+function AutoGrowTextarea({ value, onChange, className, placeholder, inputId }: {
+  value: string; onChange: (v: string) => void; className: string; placeholder?: string; inputId: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const resize = () => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight + 2}px`;
+  };
+  useLayoutEffect(resize, [value]);
+  useLayoutEffect(() => {
+    // Przelicz po zmianie szerokości okna (inna rozdzielczość / zmiana rozmiaru)
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, []);
+  return (
+    <textarea
+      ref={ref}
+      data-input-id={inputId}
+      rows={1}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      title={value || undefined}
+      placeholder={placeholder}
+      className={`${className} resize-none overflow-hidden leading-snug block group-hover:border-blue-400`}
+      style={{ minHeight: 30 }}
+    />
+  );
 }
 
 export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
@@ -143,7 +190,7 @@ export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
     return rows.filter(r => anyFieldMatches(r, filter));
   }, [rows, filter]);
 
-  const inputClass = "w-full px-2 py-1 border border-gray-300 rounded text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200";
+  const inputClass = "w-full min-w-0 px-2 py-1 border border-gray-300 rounded text-sm outline-none bg-white focus:border-blue-400 focus:ring-1 focus:ring-blue-200";
   const numInputClass = `${inputClass} text-right font-mono`;
 
   return (
@@ -166,29 +213,23 @@ export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
           {filter && <span className="text-xs text-gray-500">{filteredRows.length} z {rows.length} wpisów</span>}
           <span className="text-xs text-gray-400 ml-auto">Zapis automatyczny · Sortowanie: data wydania ↑</span>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm" style={{ minWidth: '1050px' }}>
-            <thead className="bg-gray-900 text-white">
-              <tr>
-                <th className="text-left p-2 w-32">Kod</th>
-                <th className="text-center p-2 w-28">Waga Stan</th>
-                <th className="text-left p-2 w-32">Wydanie do Ambro</th>
-                <th className="text-left p-2 w-32">Przyjęcie do EC</th>
-                <th className="text-left p-2 w-24">Ilość Palet</th>
-                <th className="text-left p-2 w-28">Nr KW</th>
-                <th className="text-left p-2 w-28">Wydanie</th>
-                <th className="text-left p-2 w-28">Przyjęcie EC</th>
-                <th className="text-left p-2">Uwagi</th>
-                <th className="w-8"></th>
-              </tr>
-            </thead>
-          </table>
-        </div>
       </div>
 
-      {/* SCROLLOWALNA LISTA */}
-      <div className="flex-1 overflow-y-auto overflow-x-auto bg-white">
-        <table className="w-full text-sm" style={{ minWidth: '1050px' }}>
+      {/* LISTA – jedna tabela, nagłówek przyklejony u góry przewijanego obszaru */}
+      <div className="flex-1 overflow-auto bg-white">
+        <table className="w-full text-sm" style={{ minWidth: MIN_TABLE_WIDTH, tableLayout: 'fixed', borderCollapse: 'separate', borderSpacing: 0 }}>
+          <colgroup>
+            {COLS.map((c, i) => <col key={i} style={c.width ? { width: c.width } : undefined} />)}
+          </colgroup>
+          <thead className="text-white sticky top-0 z-10">
+            <tr>
+              {COLS.map((c, i) => (
+                <th key={i} className={`p-2 font-semibold leading-tight bg-gray-900 ${c.align === 'center' ? 'text-center' : 'text-left'}`}>
+                  {c.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
           <tbody>
             {filteredRows.map((r) => {
               const rKey = rowKey(r);
@@ -199,8 +240,8 @@ export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
               const wydano = stan === 0 && wydanie > 0;
 
               return (
-                <tr key={rKey} className="border-t hover:bg-gray-50">
-                  <td className="p-1 w-32">
+                <tr key={rKey} className="group transition-colors hover:bg-blue-100 [&>td]:border-t [&>td]:border-gray-200 hover:[&>td:first-child]:shadow-[inset_4px_0_0_#3b82f6]">
+                  <td className="p-1 align-top">
                     <input data-input-id={`${rKey}-kod`}
                       value={r.raw_label ?? ''}
                       onChange={(e) => update(rKey, { raw_label: e.target.value })}
@@ -212,7 +253,7 @@ export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
                     )}
                   </td>
 
-                  <td className="p-1 w-28 text-center">
+                  <td className="p-1 align-top text-center pt-2">
                     {wydano ? (
                       <span className="inline-block px-2 py-0.5 rounded text-xs font-bold"
                         style={{ background: '#dcfce7', color: '#166534', border: '1px solid #bbf7d0' }}>
@@ -227,56 +268,56 @@ export function AmbroEditor({ initial }: { initial: AmbroEntry[] }) {
                     )}
                   </td>
 
-                  <td className="p-1 w-32">
+                  <td className="p-1 align-top">
                     <input data-input-id={`${rKey}-wydanie_ambro`}
                       type="number" step="any" value={r.wydanie_ambro ?? ''}
                       onChange={(e) => update(rKey, { wydanie_ambro: e.target.value ? Number(e.target.value) : null })}
                       className={numInputClass} style={{ color: '#b45309' }} placeholder="0" />
                   </td>
 
-                  <td className="p-1 w-32">
+                  <td className="p-1 align-top">
                     <input data-input-id={`${rKey}-przyjecie_ec`}
                       type="number" step="any" value={r.przyjecie_ec ?? ''}
                       onChange={(e) => update(rKey, { przyjecie_ec: e.target.value ? Number(e.target.value) : null })}
                       className={numInputClass} style={{ color: '#166534' }} placeholder="0" />
                   </td>
 
-                  <td className="p-1 w-24">
+                  <td className="p-1 align-top">
                     <input data-input-id={`${rKey}-ilosc_palet`}
                       type="number" step="any" value={r.ilosc_palet ?? ''}
                       onChange={(e) => update(rKey, { ilosc_palet: e.target.value ? Number(e.target.value) : null })}
                       className={numInputClass} style={{ color: '#374151' }} placeholder="0" />
                   </td>
 
-                  <td className="p-1 w-28">
+                  <td className="p-1 align-top">
                     <input data-input-id={`${rKey}-kwit`}
                       value={r.kwit ?? ''}
                       onChange={(e) => update(rKey, { kwit: e.target.value })}
                       className={inputClass} placeholder="nr kwitu" />
                   </td>
 
-                  <td className="p-1 w-28">
+                  <td className="p-1 align-top">
                     <input data-input-id={`${rKey}-wydanie_data`}
                       type="date" value={r.issue_date ?? ''}
                       onChange={(e) => update(rKey, { issue_date: e.target.value })}
                       className={inputClass} />
                   </td>
 
-                  <td className="p-1 w-28">
+                  <td className="p-1 align-top">
                     <input data-input-id={`${rKey}-przyjecie_data`}
                       type="date" value={r.receive_date ?? ''}
                       onChange={(e) => update(rKey, { receive_date: e.target.value })}
                       className={inputClass} />
                   </td>
 
-                  <td className="p-1">
-                    <input data-input-id={`${rKey}-notes`}
+                  <td className="p-1 align-top">
+                    <AutoGrowTextarea inputId={`${rKey}-notes`}
                       value={r.notes ?? ''}
-                      onChange={(e) => update(rKey, { notes: e.target.value })}
+                      onChange={(v) => update(rKey, { notes: v })}
                       className={inputClass} placeholder="uwagi" />
                   </td>
 
-                  <td className="p-1 w-8 text-center">
+                  <td className="p-1 align-top text-center pt-2">
                     <button onClick={() => removeRow(rKey)} disabled={pending}
                       className="text-red-400 hover:text-red-600 hover:bg-red-50 rounded px-1 transition-all">✖</button>
                   </td>
